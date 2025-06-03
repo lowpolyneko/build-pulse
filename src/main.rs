@@ -1,13 +1,26 @@
 use jenkins_api::{
     JenkinsBuilder,
-    client::{AdvancedQuery, Path},
-    job::CommonJob,
+    build::BuildStatus,
+    client::{Path, TreeBuilder},
 };
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct ViewJobs {
-    jobs: Vec<CommonJob>,
+    jobs: Vec<ViewJob>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ViewJob {
+    name: String,
+    last_build: Option<ViewBuild>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ViewBuild {
+    timestamp: u64,
+    result: Option<BuildStatus>,
 }
 
 fn main() {
@@ -20,34 +33,21 @@ fn main() {
             Path::View {
                 name: "mpich-main-nightly",
             },
-            AdvancedQuery::Depth(1),
+            TreeBuilder::new()
+                .with_field(
+                    TreeBuilder::object("jobs")
+                        .with_subfield("name")
+                        .with_subfield(
+                            TreeBuilder::object("lastBuild")
+                                .with_subfield("timestamp")
+                                .with_subfield("result"),
+                        ),
+                )
+                .build(),
         )
         .expect("failed to query jobs");
 
     for job in view.jobs {
-        println!(
-            "{} {}",
-            job.name,
-            job.last_build
-                .map_or(String::from("null"), |b| format!("#{}", b.number))
-        );
+        println!("last build for job {} is {:?}", job.name, job.last_build);
     }
-    // let view = jenkins
-    //     .get_view("mpich-main-nightly")
-    //     .expect("failed to get view");
-    //
-    // for job in view.jobs {
-    //     let build = job
-    //         .get_full_job(&jenkins)
-    //         .expect("failed to get jobs")
-    //         .last_build
-    //         .expect("failed to get last build")
-    //         .get_full_build(&jenkins)
-    //         .expect("failed to get details for last build");
-    //
-    //     println!(
-    //         "last build for job {} at {} was {:?}",
-    //         job.name, build.timestamp, build.result
-    //     );
-    // }
 }
