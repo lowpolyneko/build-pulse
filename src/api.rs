@@ -18,6 +18,7 @@ pub fn pull_jobs(url: &str, project_name: &str) -> Result<SparseMatrixProject> {
                     .with_subfield(
                         TreeBuilder::object("lastBuild")
                             .with_subfield("url")
+                            .with_subfield("displayName")
                             .with_subfield("timestamp")
                             .with_subfield("result")
                             .with_subfield(

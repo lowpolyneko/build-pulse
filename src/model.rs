@@ -18,8 +18,10 @@ pub struct SparseJob {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SparseBuild {
     pub url: String,
+    pub display_name: String,
     pub timestamp: u64,
     pub result: Option<BuildStatus>,
     pub runs: Vec<ShortBuild>,

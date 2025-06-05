@@ -22,11 +22,15 @@ pub fn render(project: &SparseMatrixProject) -> Markup {
                             Some(BuildStatus::Success) => { health += 1; "good " },
                             Some(BuildStatus::Failure) => "bad ",
                             Some(BuildStatus::Unstable) => "unstable ",
+                            None => "",
                             _ => "? ",
                         }) {
                             (r)
                         }
                         ({ total += 1; j.name.as_str() })
+                        @if let Some(n) = j.last_build.as_ref().map(|b| b.display_name.as_str()) {
+                            (n)
+                        }
                     }
                 }
                 p {
