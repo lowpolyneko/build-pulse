@@ -1,7 +1,8 @@
 use jenkins_api::{
     JenkinsBuilder,
-    build::BuildStatus,
+    build::{Build, BuildStatus},
     client::{Path, TreeBuilder},
+    job::CommonJob,
 };
 use serde::Deserialize;
 
@@ -18,9 +19,19 @@ struct ViewJob {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ViewBuild {
+    url: String,
     timestamp: u64,
     result: Option<BuildStatus>,
+}
+
+impl Build for ViewBuild {
+    type ParentJob = CommonJob;
+
+    fn url(&self) -> &str {
+        self.url.as_str()
+    }
 }
 
 fn main() {
@@ -39,6 +50,7 @@ fn main() {
                         .with_subfield("name")
                         .with_subfield(
                             TreeBuilder::object("lastBuild")
+                                .with_subfield("url")
                                 .with_subfield("timestamp")
                                 .with_subfield("result"),
                         ),
@@ -49,5 +61,10 @@ fn main() {
 
     for job in view.jobs {
         println!("last build for job {} is {:?}", job.name, job.last_build);
+        println!(
+            "{:?}",
+            job.last_build
+                .map_or(None, |j| Some(j.get_console(&jenkins)))
+        );
     }
 }
