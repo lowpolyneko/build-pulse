@@ -11,24 +11,27 @@ pub fn render(project: &SparseMatrixProject) -> Markup {
                 meta charset="utf-8";
             }
             body {
-                p {
-                    "Health:"
-                    progress value="10" max="100" {}
-                }
                 h1 {
                     "Job Status"
                 }
+                @let mut health = 0;
+                @let mut total = 0;
                 @for j in &project.jobs {
                     p {
                         @if let Some(r) = j.last_build.as_ref().map(|b| b.result).map(|r| match r {
-                            Some(BuildStatus::Success) => "good",
-                            Some(BuildStatus::Failure) => "bad",
-                            _ => "?",
+                            Some(BuildStatus::Success) => { health += 1; "good " },
+                            Some(BuildStatus::Failure) => "bad ",
+                            Some(BuildStatus::Unstable) => "unstable ",
+                            _ => "? ",
                         }) {
                             (r)
                         }
-                        (j.name)
+                        ({ total += 1; j.name.as_str() })
                     }
+                }
+                p {
+                    "Health:"
+                    progress value=(health) max=(total) {}
                 }
             }
         }
