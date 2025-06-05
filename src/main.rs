@@ -1,6 +1,6 @@
 use jenkins_api::{
     JenkinsBuilder,
-    build::{Build, BuildStatus},
+    build::{Build, BuildStatus, ShortBuild},
     client::{Path, TreeBuilder},
     job::CommonJob,
 };
@@ -24,6 +24,7 @@ struct ViewBuild {
     url: String,
     timestamp: u64,
     result: Option<BuildStatus>,
+    runs: Vec<ShortBuild>,
 }
 
 impl Build for ViewBuild {
@@ -52,7 +53,12 @@ fn main() {
                             TreeBuilder::object("lastBuild")
                                 .with_subfield("url")
                                 .with_subfield("timestamp")
-                                .with_subfield("result"),
+                                .with_subfield("result")
+                                .with_subfield(
+                                    TreeBuilder::object("runs")
+                                        .with_subfield("url")
+                                        .with_subfield("number"),
+                                ),
                         ),
                 )
                 .build(),
@@ -61,10 +67,16 @@ fn main() {
 
     for job in view.jobs {
         println!("last build for job {} is {:?}", job.name, job.last_build);
-        println!(
-            "{:?}",
-            job.last_build
-                .map_or(None, |j| Some(j.get_console(&jenkins)))
-        );
+        if let Some(build) = job.last_build {
+            build.runs.iter().for_each(|mb| {
+                println!(
+                    "{:?}",
+                    match mb.get_full_build(&jenkins) {
+                        Ok(x) => x.get_console(&jenkins),
+                        Err(x) => Err(x),
+                    }
+                )
+            });
+        }
     }
 }
