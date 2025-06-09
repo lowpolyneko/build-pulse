@@ -1,10 +1,11 @@
-use std::{fs::File, io::Write};
+use std::{error::Error, fs::File, io::Write};
 
 use clap::Parser;
 use jenkins_api::{
     JenkinsBuilder,
     build::{Build, BuildStatus},
 };
+use log::{info, warn};
 
 mod api;
 mod model;
@@ -23,36 +24,48 @@ struct Args {
     output: String,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let jenkins = JenkinsBuilder::new(args.jenkins_url.as_str())
-        .build()
-        .expect("failed to connect to Jenkins");
-    let project = api::pull_jobs(&jenkins, &args.project).expect("failed to pull jobs");
+    // initialize logging
+    env_logger::init();
+
+    info!(
+        "Pulling associated jobs for {} from {}...",
+        args.project, args.jenkins_url
+    );
+
+    let jenkins = JenkinsBuilder::new(args.jenkins_url.as_str()).build()?;
+    let project = api::pull_jobs(&jenkins, &args.project)?;
+
+    info!("Pulling build info for each job...");
 
     for job in &project.jobs {
-        println!("last build for job {} is {:?}", job.name, job.last_build);
+        info!("Job {}", job.name);
         if let Some(build) = &job.last_build {
-            build.runs.iter().for_each(|mb| {
-                if let Some(console) = match mb.get_full_build(&jenkins) {
-                    Ok(x) => match x.result {
-                        Some(BuildStatus::Failure) => x.get_console(&jenkins).ok(),
-                        _ => None,
-                    },
-                    Err(_) => None,
+            info!("Last build for job {} is {}", job.name, build.display_name);
+            build.runs.iter().try_for_each(|mb| {
+                let x = mb.get_full_build(&jenkins)?;
+                if let Some(console) = match x.result {
+                    Some(BuildStatus::Failure) => x.get_console(&jenkins).ok(),
+                    _ => None,
                 } {
-                    println!("{}", console);
+                    warn!("{}", "Run failed!");
+                    warn!("{}", console);
                 } else {
-                    println!("no build log available");
+                    info!("Run is okay");
                 }
-            });
-            println!("----------------------------------------");
+
+                Ok::<(), Box<dyn Error>>(())
+            })?;
+            info!("----------------------------------------");
         }
     }
 
-    let mut report = File::create(args.output).expect("failed to open output report file");
-    report
-        .write(page::render(&project).into_string().as_bytes())
-        .expect("failed to write to output report file");
+    info!("Generating report...");
+
+    let mut report = File::create(args.output)?;
+    report.write(page::render(&project).into_string().as_bytes())?;
+
+    Ok(())
 }
