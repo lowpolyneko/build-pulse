@@ -17,7 +17,7 @@ pub struct SparseJob {
     pub last_build: Option<SparseBuild>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SparseBuild {
     pub url: String,
