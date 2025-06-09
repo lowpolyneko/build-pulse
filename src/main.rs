@@ -10,6 +10,7 @@ use log::{info, warn};
 mod api;
 mod model;
 mod page;
+mod parse;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -39,8 +40,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let project = api::pull_jobs(&jenkins, &args.project)?;
 
     info!("Pulling build info for each job...");
+    info!("----------------------------------------");
 
-    for job in &project.jobs {
+    project.jobs.iter().try_for_each(|job| {
         info!("Job {}", job.name);
         if let Some(build) = &job.last_build {
             info!("Last build for job {} is {}", job.name, build.display_name);
@@ -52,6 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } {
                     warn!("{}", "Run failed!");
                     warn!("{}", console);
+                    parse::grep_issues(&console)?;
                 } else {
                     info!("Run is okay");
                 }
@@ -60,7 +63,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             })?;
             info!("----------------------------------------");
         }
-    }
+
+        Ok::<(), Box<dyn Error>>(())
+    })?;
 
     info!("Generating report...");
 

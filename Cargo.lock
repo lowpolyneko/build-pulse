@@ -94,6 +94,7 @@ dependencies = [
  "jenkins_api",
  "log",
  "maud",
+ "regex",
  "serde",
 ]
 
