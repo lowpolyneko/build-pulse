@@ -18,13 +18,7 @@ mod parse;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(default_value = "https://jenkins-pmrs.cels.anl.gov")]
-    jenkins_url: String,
-
-    #[arg(default_value = "mpich-main-nightly")]
-    project: String,
-
-    #[arg(short, long, default_value = "config.toml")]
+    #[arg(default_value = "config.toml")]
     config: String,
 
     #[arg(short, long)]
@@ -45,11 +39,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!(
         "Pulling associated jobs for {} from {}...",
-        args.project, args.jenkins_url
+        config.project, config.jenkins_url
     );
 
-    let jenkins = JenkinsBuilder::new(args.jenkins_url.as_str()).build()?;
-    let project = api::pull_jobs(&jenkins, &args.project)?;
+    let jenkins = match config.username {
+        Some(user) => JenkinsBuilder::new(&config.jenkins_url)
+            .with_user(user.as_str(), config.password.as_deref())
+            .build()?,
+        None => JenkinsBuilder::new(&config.jenkins_url).build()?,
+    };
+    let project = api::pull_jobs(&jenkins, &config.project)?;
 
     info!("Pulling build info for each job...");
     info!("----------------------------------------");

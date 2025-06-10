@@ -1,3 +1,9 @@
+jenkins_url = "https://jenkins-pmrs.cels.anl.gov"
+project = "mpich-main-nightly"
+
+# username = <OPTIONAL: your user>
+# password = <OPTIONAL: your password>
+
 [[issue]]
 name = "GCC Compiler Diagnostic"
 
