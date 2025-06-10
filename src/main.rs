@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     // initialize logging
-    env_logger::init_from_env(Env::new().filter(format!("{}=trace", crate_name!())));
+    env_logger::init_from_env(Env::default().default_filter_or("info"));
     info!("{} {}", crate_name!(), crate_version!());
 
     // load config
@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     warn!("{}", console);
                     parse::grep_issues(&issue_patterns, &console).for_each(|issue| {
                         info!("START MATCH ----------");
-                        println!("{}", issue.snippet);
+                        info!("{}", issue.snippet);
                         info!("END MATCH ------------");
                     });
                 } else {
