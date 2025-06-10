@@ -1,11 +1,14 @@
-use std::{error::Error, fs::File, io::Write};
+use std::{error::Error, fs};
 
-use clap::Parser;
+use clap::{Parser, crate_name, crate_version};
+use env_logger::Env;
 use jenkins_api::{
     JenkinsBuilder,
     build::{Build, BuildStatus},
 };
 use log::{info, warn};
+
+use crate::{config::Config, parse::load_regex};
 
 mod api;
 mod config;
@@ -21,15 +24,24 @@ struct Args {
     #[arg(default_value = "mpich-main-nightly")]
     project: String,
 
-    #[arg(default_value = "report.html")]
-    output: String,
+    #[arg(short, long, default_value = "config.toml")]
+    config: String,
+
+    #[arg(short, long)]
+    output: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     // initialize logging
-    env_logger::init();
+    env_logger::init_from_env(Env::new().filter(format!("{}=trace", crate_name!())));
+    info!("{} {}", crate_name!(), crate_version!());
+
+    // load config
+    info!("Compiling issue patterns...");
+    let config: Config = toml::from_str(fs::read_to_string(args.config)?.as_str())?;
+    let issue_patterns = load_regex(&config.issue)?;
 
     info!(
         "Pulling associated jobs for {} from {}...",
@@ -54,7 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } {
                     warn!("{}", "Run failed!");
                     warn!("{}", console);
-                    parse::grep_issues(&console)?;
+                    parse::grep_issues(&issue_patterns, &console);
                 } else {
                     info!("Run is okay");
                 }
@@ -69,8 +81,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("Generating report...");
 
-    let mut report = File::create(args.output)?;
-    report.write(page::render(&project).into_string().as_bytes())?;
+    if let Some(filepath) = args.output {
+        let output = page::render(&project).into_string();
+
+        if filepath.is_empty() {
+            info!("Dumping to stdout --");
+            println!("{}", output);
+        } else {
+            fs::write(&filepath, output)?;
+
+            info!("Written to {}", filepath);
+        }
+    }
 
     Ok(())
 }

@@ -12,15 +12,6 @@ pub struct IssuePattern {
     regex: Regex,
 }
 
-impl IntoIterator for IssuePatterns {
-    type Item = IssuePattern;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.issues.into_iter()
-    }
-}
-
 pub fn load_regex(issues: &Vec<Issue>) -> Result<IssuePatterns, regex::Error> {
     let compiled_issues = issues
         .iter()
@@ -39,7 +30,7 @@ pub fn load_regex(issues: &Vec<Issue>) -> Result<IssuePatterns, regex::Error> {
 }
 
 pub fn grep_issues(patterns: &IssuePatterns, log: &String) {
-    patterns.into_iter().map(|p| {
+    patterns.issues.iter().for_each(|p| {
         p.regex.find_iter(log).for_each(|m| {
             println!("START MATCH--------");
             println!("{}", m.as_str());
