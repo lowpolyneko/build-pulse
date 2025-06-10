@@ -1,7 +1,7 @@
 use jenkins_api::build::BuildStatus;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::model::SparseMatrixProject;
+use crate::api::SparseMatrixProject;
 
 pub fn render(project: &SparseMatrixProject) -> Markup {
     html! {

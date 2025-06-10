@@ -1,21 +1,49 @@
-use std::error::Error;
+use regex::{Regex, RegexSet};
 
-use regex::Regex;
+use crate::config::Issue;
 
-pub fn grep_issues(log: &String) -> Result<(), Box<dyn Error>> {
-    // Matches messages of the following
-    // filepath:lineno:linecol?: error: <message>\n
-    //  <indented followups>
-    // <make error>
-    // https://www.gnu.org/prep/standards/html_node/Errors.html
-    let re =
-        Regex::new(r"(?m)^[a-zA-Z0-9_\-./ ]+:[0-9]+(:[0-9]+)?: error: .*(\n\s*.*)*?\nmake.*$")?;
+pub struct IssuePatterns {
+    issues: Vec<IssuePattern>,
+    match_set: RegexSet,
+}
 
-    re.find_iter(log).for_each(|m| {
-        println!("START MATCH--------");
-        println!("{}", m.as_str());
-        println!("END MATCH--------");
+pub struct IssuePattern {
+    name: String,
+    regex: Regex,
+}
+
+impl IntoIterator for IssuePatterns {
+    type Item = IssuePattern;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.issues.into_iter()
+    }
+}
+
+pub fn load_regex(issues: &Vec<Issue>) -> Result<IssuePatterns, regex::Error> {
+    let compiled_issues = issues
+        .iter()
+        .map(|i| {
+            Ok(IssuePattern {
+                name: i.name.clone(),
+                regex: Regex::new(&i.pattern)?,
+            })
+        })
+        .collect::<Result<Vec<IssuePattern>, _>>()?;
+
+    Ok(IssuePatterns {
+        issues: compiled_issues,
+        match_set: RegexSet::new(issues.iter().map(|i| &i.pattern))?,
+    })
+}
+
+pub fn grep_issues(patterns: &IssuePatterns, log: &String) {
+    patterns.into_iter().map(|p| {
+        p.regex.find_iter(log).for_each(|m| {
+            println!("START MATCH--------");
+            println!("{}", m.as_str());
+            println!("END MATCH--------");
+        })
     });
-
-    Ok(())
 }

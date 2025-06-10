@@ -8,7 +8,7 @@ use jenkins_api::{
 use log::{info, warn};
 
 mod api;
-mod model;
+mod config;
 mod page;
 mod parse;
 

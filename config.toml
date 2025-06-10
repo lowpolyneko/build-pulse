@@ -1,0 +1,9 @@
+[[issue]]
+name = "GCC Compiler Diagnostic"
+
+# Matches messages of the following
+# filepath:lineno:linecol?: error: <message>\n
+#  <indented followups>
+# <make error>
+# https://www.gnu.org/prep/standards/html_node/Errors.html
+pattern = '(?m)^[a-zA-Z0-9_\-./ ]+:[0-9]+(:[0-9]+)?: error: .*(\n\s*.*)*?\nmake.*$'
