@@ -66,7 +66,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } {
                     warn!("{}", "Run failed!");
                     warn!("{}", console);
-                    parse::grep_issues(&issue_patterns, &console);
+                    parse::grep_issues(&issue_patterns, &console).for_each(|issue| {
+                        info!("START MATCH ----------");
+                        println!("{}", issue.snippet);
+                        info!("END MATCH ------------");
+                    });
                 } else {
                     info!("Run is okay");
                 }

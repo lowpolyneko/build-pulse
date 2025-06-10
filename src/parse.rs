@@ -1,6 +1,6 @@
-use regex::{Regex, RegexSet};
+use regex::{Match, Regex, RegexSet};
 
-use crate::config::Issue;
+use crate::config::ConfigIssue;
 
 pub struct IssuePatterns {
     issues: Vec<IssuePattern>,
@@ -12,7 +12,11 @@ pub struct IssuePattern {
     regex: Regex,
 }
 
-pub fn load_regex(issues: &Vec<Issue>) -> Result<IssuePatterns, regex::Error> {
+pub struct Issue<'a> {
+    pub snippet: &'a str,
+}
+
+pub fn load_regex(issues: &Vec<ConfigIssue>) -> Result<IssuePatterns, regex::Error> {
     let compiled_issues = issues
         .iter()
         .map(|i| {
@@ -29,12 +33,18 @@ pub fn load_regex(issues: &Vec<Issue>) -> Result<IssuePatterns, regex::Error> {
     })
 }
 
-pub fn grep_issues(patterns: &IssuePatterns, log: &String) {
-    patterns.issues.iter().for_each(|p| {
-        p.regex.find_iter(log).for_each(|m| {
-            println!("START MATCH--------");
-            println!("{}", m.as_str());
-            println!("END MATCH--------");
+pub fn grep_issues<'a>(
+    patterns: &IssuePatterns,
+    log: &'a String,
+) -> impl Iterator<Item = Issue<'a>> {
+    // matches using the match set first, then the regex of all valid matches are ran again to find them
+    patterns
+        .match_set
+        .matches(log)
+        .into_iter()
+        .map(|i| &patterns.issues[i].regex)
+        .flat_map(|re| re.find_iter(log))
+        .map(|m| Issue {
+            snippet: m.as_str(),
         })
-    });
 }

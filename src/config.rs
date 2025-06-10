@@ -2,11 +2,11 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub issue: Vec<Issue>,
+    pub issue: Vec<ConfigIssue>,
 }
 
 #[derive(Deserialize)]
-pub struct Issue {
+pub struct ConfigIssue {
     pub name: String,
     pub pattern: String,
 }
