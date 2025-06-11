@@ -6,6 +6,7 @@ pub struct Config {
     pub project: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub database: String,
     pub issue: Vec<ConfigIssue>,
 }
 

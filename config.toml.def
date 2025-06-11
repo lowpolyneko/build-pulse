@@ -4,6 +4,8 @@ project = "mpich-main-nightly"
 # username = <OPTIONAL: your user>
 # password = <OPTIONAL: your password>
 
+database = "data.db"
+
 [[issue]]
 name = "GCC Compiler Diagnostic"
 

@@ -4,6 +4,8 @@ mkShell {
   packages = [
     openssl
     pkg-config
+    rustup
+    sqlite
   ];
 }
 

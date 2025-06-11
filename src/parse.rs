@@ -1,6 +1,6 @@
-use regex::{Match, Regex, RegexSet};
+use regex::{Regex, RegexSet};
 
-use crate::config::ConfigIssue;
+use crate::{config::ConfigIssue, db::Issue};
 
 pub struct IssuePatterns {
     issues: Vec<IssuePattern>,
@@ -10,10 +10,6 @@ pub struct IssuePatterns {
 pub struct IssuePattern {
     name: String,
     regex: Regex,
-}
-
-pub struct Issue<'a> {
-    pub snippet: &'a str,
 }
 
 pub fn load_regex(issues: &Vec<ConfigIssue>) -> Result<IssuePatterns, regex::Error> {
@@ -45,6 +41,7 @@ pub fn grep_issues<'a>(
         .map(|i| &patterns.issues[i].regex)
         .flat_map(|re| re.find_iter(log))
         .map(|m| Issue {
+            id: None,
             snippet: m.as_str(),
         })
 }

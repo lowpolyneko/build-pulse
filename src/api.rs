@@ -6,6 +6,8 @@ use jenkins_api::{
 };
 use serde::Deserialize;
 
+use crate::db::Log;
+
 #[derive(Deserialize)]
 pub struct SparseMatrixProject {
     pub jobs: Vec<SparseJob>,
@@ -43,6 +45,15 @@ impl Build for SparseBuild {
 
     fn url(&self) -> &str {
         self.url.as_str()
+    }
+}
+
+impl Log {
+    pub fn new<T: Build>(build: &T, jenkins_client: &Jenkins) -> Result<Log> {
+        Ok(Log {
+            id: None,
+            data: build.get_console(jenkins_client)?,
+        })
     }
 }
 

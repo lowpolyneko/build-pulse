@@ -8,10 +8,15 @@ use jenkins_api::{
 };
 use log::{info, warn};
 
-use crate::{config::Config, parse::load_regex};
+use crate::{
+    config::Config,
+    db::{Database, Log},
+    parse::load_regex,
+};
 
 mod api;
 mod config;
+mod db;
 mod page;
 mod parse;
 
@@ -37,6 +42,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let config: Config = toml::from_str(fs::read_to_string(args.config)?.as_str())?;
     let issue_patterns = load_regex(&config.issue)?;
 
+    // open db
+    info!("Opening database...");
+    let database = Database::open(&config.database)?;
+
     info!(
         "Pulling associated jobs for {} from {}...",
         config.project, config.jenkins_url
@@ -59,17 +68,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             info!("Last build for job {} is {}", job.name, build.display_name);
             build.runs.iter().try_for_each(|mb| {
                 let x = mb.get_full_build(&jenkins)?;
-                if let Some(console) = match x.result {
-                    Some(BuildStatus::Failure) => x.get_console(&jenkins).ok(),
+                if let Some(log) = match x.result {
+                    Some(BuildStatus::Failure) => Log::new(&x, &jenkins).ok(),
                     _ => None,
                 } {
                     warn!("{}", "Run failed!");
-                    warn!("{}", console);
-                    parse::grep_issues(&issue_patterns, &console).for_each(|issue| {
+                    warn!("{}", log.data);
+                    parse::grep_issues(&issue_patterns, &log.data).for_each(|issue| {
                         info!("START MATCH ----------");
                         info!("{}", issue.snippet);
                         info!("END MATCH ------------");
                     });
+                    let _committed_log = database.insert_log(log)?;
                 } else {
                     info!("Run is okay");
                 }
