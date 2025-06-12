@@ -59,6 +59,7 @@ where
     fn to_log(&self, jenkins_client: &Jenkins) -> Result<Log> {
         Ok(Log {
             id: None,
+            build_url: self.url().to_string(),
             data: self.get_console(jenkins_client)?,
         })
     }

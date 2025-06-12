@@ -32,16 +32,16 @@ impl IssuePatterns {
 }
 
 pub trait Parse {
-    fn get_data(&self) -> &str;
+    fn data(&self) -> &str;
 
     fn grep_issues(&self, patterns: &IssuePatterns) -> impl Iterator<Item = Issue> {
         // matches using the match set first, then the regex of all valid matches are ran again to find them
         patterns
             .match_set
-            .matches(self.get_data())
+            .matches(self.data())
             .into_iter()
             .map(|i| &patterns.issues[i].regex)
-            .flat_map(|re| re.find_iter(self.get_data()))
+            .flat_map(|re| re.find_iter(self.data()))
             .map(|m| Issue {
                 id: None,
                 snippet: m.as_str(),
