@@ -1,9 +1,10 @@
-use std::{error::Error, fs};
+use std::{error::Error, fs, sync::Mutex};
 
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
 use jenkins_api::{JenkinsBuilder, build::BuildStatus};
 use log::{info, warn};
+use rayon::prelude::*;
 
 use crate::{
     api::{SparseMatrixProject, ToLog},
@@ -42,7 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // open db
     info!("Opening database...");
-    let database = Database::open(&config.database)?;
+    let database = Mutex::new(Database::open(&config.database)?);
 
     info!(
         "Pulling associated jobs for {} from {}...",
@@ -60,25 +61,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("Pulling build info for each job...");
     info!("----------------------------------------");
 
-    project.jobs.iter().try_for_each(|job| {
+    project.jobs.iter().for_each(|job| {
         info!("Job {}", job.name);
         if let Some(build) = &job.last_build {
             info!("Last build for job {} is {}", job.name, build.display_name);
-            build.runs.iter().try_for_each(|mb| {
-                let x = mb.get_full_build(&jenkins)?;
+            build.runs.par_iter().for_each(|mb| {
+                let x = mb.get_full_build(&jenkins).expect("Failed to get build");
                 if let Some(log) = match x.result {
-                    Some(BuildStatus::Failure) => match database.get_log(&x.url) {
+                    Some(BuildStatus::Failure) => match database.lock().unwrap().get_log(&x.url) {
                         Ok(log) => {
                             info!("Cached log");
                             Some(log)
                         }
                         Err(rusqlite::Error::QueryReturnedNoRows) => {
                             warn!("Fresh log, grabbing...");
-                            let log = database.insert_log(x.to_log(&jenkins)?)?;
-                            log.grep_issues(&issue_patterns).try_for_each(|i| {
-                                database.insert_issue(&log, i)?;
-                                Ok::<(), rusqlite::Error>(())
-                            })?;
+                            let log = database
+                                .lock()
+                                .unwrap()
+                                .insert_log(x.to_log(&jenkins).expect("Failed to download log"))
+                                .expect("Failed to insert log");
+                            log.grep_issues(&issue_patterns).for_each(|i| {
+                                database
+                                    .lock()
+                                    .unwrap()
+                                    .insert_issue(&log, i)
+                                    .expect("Failed to insert issue");
+                            });
                             Some(log)
                         }
                         _ => panic!("Failed to get log"),
@@ -99,17 +107,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // Get cached issues
                     warn!(
                         "Run failed with {} found issues!",
-                        database.get_issues(&log)?.len()
+                        database
+                            .lock()
+                            .unwrap()
+                            .get_issues(&log)
+                            .expect("Failed to select issues")
+                            .len()
                     );
                 }
-
-                Ok::<(), Box<dyn Error>>(())
-            })?;
+            });
             info!("----------------------------------------");
         }
-
-        Ok::<(), Box<dyn Error>>(())
-    })?;
+    });
 
     info!("Generating report...");
 
