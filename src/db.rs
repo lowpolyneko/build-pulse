@@ -1,5 +1,7 @@
 use rusqlite::Connection;
 
+use crate::parse::Parse;
+
 pub struct Database {
     conn: Connection,
 }
@@ -12,6 +14,12 @@ pub struct Log {
 pub struct Issue<'a> {
     pub id: Option<i64>,
     pub snippet: &'a str,
+}
+
+impl Parse for Log {
+    fn get_data(&self) -> &str {
+        &self.data
+    }
 }
 
 impl Database {

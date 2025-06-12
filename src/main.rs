@@ -6,9 +6,10 @@ use jenkins_api::{JenkinsBuilder, build::BuildStatus};
 use log::{info, warn};
 
 use crate::{
+    api::{SparseMatrixProject, ToLog},
     config::Config,
-    db::{Database, Log},
-    parse::load_regex,
+    db::Database,
+    parse::{IssuePatterns, Parse},
 };
 
 mod api;
@@ -37,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // load config
     info!("Compiling issue patterns...");
     let config: Config = toml::from_str(fs::read_to_string(args.config)?.as_str())?;
-    let issue_patterns = load_regex(&config.issue)?;
+    let issue_patterns = IssuePatterns::load_regex(&config.issue)?;
 
     // open db
     info!("Opening database...");
@@ -54,7 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .build()?,
         None => JenkinsBuilder::new(&config.jenkins_url).build()?,
     };
-    let project = api::pull_jobs(&jenkins, &config.project)?;
+    let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
     info!("Pulling build info for each job...");
     info!("----------------------------------------");
@@ -66,14 +67,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             build.runs.iter().try_for_each(|mb| {
                 let x = mb.get_full_build(&jenkins)?;
                 if let Some(log) = match x.result {
-                    Some(BuildStatus::Failure) => Log::new(&x, &jenkins).ok(),
+                    Some(BuildStatus::Failure) => x.to_log(&jenkins).ok(),
                     _ => None,
                 } {
                     warn!("{}", "Run failed!");
                     warn!("{}", log.data);
                     let committed_log = database.insert_log(log)?;
-                    let issues: Vec<_> =
-                        parse::grep_issues(&issue_patterns, &committed_log.data).collect();
+                    let issues: Vec<_> = committed_log.grep_issues(&issue_patterns).collect();
                     issues
                         .into_iter()
                         .map(|i| database.insert_issue(&committed_log, i))
@@ -103,11 +103,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if filepath.is_empty() {
             info!("Dumping to stdout --");
-            println!("{}", output);
+            println!("{output}");
         } else {
             fs::write(&filepath, output)?;
 
-            info!("Written to {}", filepath);
+            info!("Written to {filepath}");
         }
     }
 

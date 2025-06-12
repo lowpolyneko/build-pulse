@@ -31,6 +31,10 @@ pub struct SparseBuild {
     pub runs: Vec<ShortBuild>,
 }
 
+pub trait ToLog {
+    fn to_log(&self, jenkins_client: &Jenkins) -> Result<Log>;
+}
+
 impl Job for SparseJob {
     fn name(&self) -> &str {
         self.name.as_str()
@@ -48,36 +52,41 @@ impl Build for SparseBuild {
     }
 }
 
-impl Log {
-    pub fn new<T: Build>(build: &T, jenkins_client: &Jenkins) -> Result<Log> {
+impl<T> ToLog for T
+where
+    T: Build,
+{
+    fn to_log(&self, jenkins_client: &Jenkins) -> Result<Log> {
         Ok(Log {
             id: None,
-            data: build.get_console(jenkins_client)?,
+            data: self.get_console(jenkins_client)?,
         })
     }
 }
 
-pub fn pull_jobs(client: &Jenkins, project_name: &str) -> Result<SparseMatrixProject> {
-    client.get_object_as(
-        Path::View { name: project_name },
-        TreeBuilder::new()
-            .with_field(
-                TreeBuilder::object("jobs")
-                    .with_subfield("name")
-                    .with_subfield("url")
-                    .with_subfield(
-                        TreeBuilder::object("lastBuild")
-                            .with_subfield("url")
-                            .with_subfield("displayName")
-                            .with_subfield("timestamp")
-                            .with_subfield("result")
-                            .with_subfield(
-                                TreeBuilder::object("runs")
-                                    .with_subfield("url")
-                                    .with_subfield("number"),
-                            ),
-                    ),
-            )
-            .build(),
-    )
+impl SparseMatrixProject {
+    pub fn pull_jobs(client: &Jenkins, project_name: &str) -> Result<Self> {
+        client.get_object_as(
+            Path::View { name: project_name },
+            TreeBuilder::new()
+                .with_field(
+                    TreeBuilder::object("jobs")
+                        .with_subfield("name")
+                        .with_subfield("url")
+                        .with_subfield(
+                            TreeBuilder::object("lastBuild")
+                                .with_subfield("url")
+                                .with_subfield("displayName")
+                                .with_subfield("timestamp")
+                                .with_subfield("result")
+                                .with_subfield(
+                                    TreeBuilder::object("runs")
+                                        .with_subfield("url")
+                                        .with_subfield("number"),
+                                ),
+                        ),
+                )
+                .build(),
+        )
+    }
 }
