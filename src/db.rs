@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 
 pub struct Database {
     conn: Connection,
@@ -43,7 +43,7 @@ impl Database {
     }
 
     pub fn insert_log(&self, mut log: Log) -> Result<Log, Box<dyn std::error::Error>> {
-        if let Some(_) = log.id {
+        if log.id.is_some() {
             return Err(Box::from("Log has a pre-existing id!"));
         }
 
@@ -51,5 +51,30 @@ impl Database {
             .execute("INSERT INTO logs (data) VALUES (?)", (log.data.as_str(),))?;
         log.id = Some(self.conn.last_insert_rowid());
         Ok(log)
+    }
+
+    pub fn insert_issue<'a>(
+        &self,
+        log: &'a Log,
+        mut issue: Issue<'a>,
+    ) -> Result<Issue<'a>, Box<dyn std::error::Error>> {
+        if issue.id.is_some() {
+            return Err(Box::from("Issue has a pre-existing id!"));
+        }
+
+        unsafe {
+            // SAFETY: `Log` owns all underlying `Issue`s
+            let start = issue
+                .snippet
+                .as_ptr()
+                .offset_from_unsigned(log.data.as_ptr());
+            let end = start + issue.snippet.len();
+            self.conn.execute(
+                "INSERT INTO issues (snippet_start, snippet_end, log_id) VALUES (?, ?, ?)",
+                (start, end, log.id),
+            )?;
+        }
+        issue.id = Some(self.conn.last_insert_rowid());
+        Ok(issue)
     }
 }

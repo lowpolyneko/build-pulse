@@ -2,10 +2,7 @@ use std::{error::Error, fs};
 
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
-use jenkins_api::{
-    JenkinsBuilder,
-    build::{Build, BuildStatus},
-};
+use jenkins_api::{JenkinsBuilder, build::BuildStatus};
 use log::{info, warn};
 
 use crate::{
@@ -74,12 +71,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } {
                     warn!("{}", "Run failed!");
                     warn!("{}", log.data);
-                    parse::grep_issues(&issue_patterns, &log.data).for_each(|issue| {
-                        info!("START MATCH ----------");
-                        info!("{}", issue.snippet);
-                        info!("END MATCH ------------");
-                    });
-                    let _committed_log = database.insert_log(log)?;
+                    let committed_log = database.insert_log(log)?;
+                    let issues: Vec<_> =
+                        parse::grep_issues(&issue_patterns, &committed_log.data).collect();
+                    issues
+                        .into_iter()
+                        .map(|i| database.insert_issue(&committed_log, i))
+                        .try_for_each(|issue| {
+                            info!("START MATCH ----------");
+                            info!("{}", issue?.snippet);
+                            info!("END MATCH ------------");
+
+                            Ok::<(), Box<dyn Error>>(())
+                        })?;
                 } else {
                     info!("Run is okay");
                 }
