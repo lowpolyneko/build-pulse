@@ -67,25 +67,40 @@ fn main() -> Result<(), Box<dyn Error>> {
             build.runs.iter().try_for_each(|mb| {
                 let x = mb.get_full_build(&jenkins)?;
                 if let Some(log) = match x.result {
-                    Some(BuildStatus::Failure) => x.to_log(&jenkins).ok(),
-                    _ => None,
+                    Some(BuildStatus::Failure) => match database.get_log(&x.url) {
+                        Ok(log) => {
+                            info!("Cached log");
+                            Some(log)
+                        }
+                        Err(rusqlite::Error::QueryReturnedNoRows) => {
+                            warn!("Fresh log, grabbing...");
+                            let log = database.insert_log(x.to_log(&jenkins)?)?;
+                            log.grep_issues(&issue_patterns).try_for_each(|i| {
+                                database.insert_issue(&log, i)?;
+                                Ok::<(), rusqlite::Error>(())
+                            })?;
+                            Some(log)
+                        }
+                        _ => panic!("Failed to get log"),
+                    },
+                    Some(BuildStatus::Success) => {
+                        info!("Run is ok.");
+                        None
+                    }
+                    Some(BuildStatus::Aborted | BuildStatus::NotBuilt) | None => {
+                        info!("Run not finished.");
+                        None
+                    }
+                    Some(BuildStatus::Unstable) => {
+                        warn!("Run has runtime errors!");
+                        None
+                    }
                 } {
-                    warn!("{}", "Run failed!");
-                    warn!("{}", log.data);
-                    let committed_log = database.insert_log(log)?;
-                    let issues: Vec<_> = committed_log.grep_issues(&issue_patterns).collect();
-                    issues
-                        .into_iter()
-                        .map(|i| database.insert_issue(&committed_log, i))
-                        .try_for_each(|issue| {
-                            info!("START MATCH ----------");
-                            info!("{}", issue?.snippet);
-                            info!("END MATCH ------------");
-
-                            Ok::<(), Box<dyn Error>>(())
-                        })?;
-                } else {
-                    info!("Run is okay");
+                    // Get cached issues
+                    warn!(
+                        "Run failed with {} found issues!",
+                        database.get_issues(&log)?.len()
+                    );
                 }
 
                 Ok::<(), Box<dyn Error>>(())

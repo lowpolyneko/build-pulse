@@ -81,4 +81,31 @@ impl Database {
         issue.id = Some(self.conn.last_insert_rowid());
         Ok(issue)
     }
+
+    pub fn get_log(&self, build_url: &str) -> Result<Log> {
+        self.conn.query_one(
+            "SELECT id, build_url, data FROM logs WHERE build_url = ?",
+            (build_url,),
+            |row| {
+                Ok(Log {
+                    id: row.get(0)?,
+                    build_url: row.get(1)?,
+                    data: row.get(2)?,
+                })
+            },
+        )
+    }
+
+    pub fn get_issues<'a>(&self, log: &'a Log) -> Result<Vec<Issue<'a>>> {
+        Ok(self
+            .conn
+            .prepare("SELECT id, snippet_start, snippet_end, log_id FROM issues WHERE log_id = ?")?
+            .query_map((log.id.expect("Log has not been committed!"),), |row| {
+                Ok(Issue {
+                    id: Some(row.get(0)?),
+                    snippet: &log.data[row.get(1)?..row.get(2)?],
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
 }
