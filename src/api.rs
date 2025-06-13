@@ -7,7 +7,7 @@ use jenkins_api::{
 };
 use serde::Deserialize;
 
-use crate::db::Log;
+use crate::db::Run;
 
 #[derive(Deserialize)]
 pub struct SparseMatrixProject {
@@ -32,38 +32,56 @@ pub struct SparseBuild {
     pub runs: Vec<ShortBuild>,
 }
 
-pub trait ToLog {
-    fn to_log(&self, jenkins_client: &Jenkins) -> Result<Log>;
+pub trait AsRun {
+    fn as_run(&self, jenkins_client: &Jenkins) -> Result<Run>;
 }
+
+pub trait HasBuildFields {
+    fn build_status(&self) -> Option<BuildStatus>;
+    fn full_display_name_or_default(&self) -> &str;
+}
+
+macro_rules! impl_HasBuildFields {
+    (for $($t:ty),+) => {
+        $(impl HasBuildFields for $t {
+            fn build_status(&self) -> Option<BuildStatus> {
+                self.result
+            }
+
+            fn full_display_name_or_default(&self) -> &str {
+                self.full_display_name
+                    .as_ref()
+                    .unwrap_or(&self.display_name)
+            }
+        })*
+    }
+}
+
+impl_HasBuildFields!(for jenkins_api::build::CommonBuild);
 
 impl Job for SparseJob {
     fn name(&self) -> &str {
-        self.name.as_str()
+        &self.name
     }
     fn url(&self) -> &str {
-        self.url.as_str()
+        &self.url
     }
 }
 
-impl Build for SparseBuild {
-    type ParentJob = SparseJob;
-
-    fn url(&self) -> &str {
-        self.url.as_str()
-    }
-}
-
-impl<T> ToLog for T
+impl<T> AsRun for T
 where
-    T: Build,
+    T: Build + HasBuildFields,
 {
-    fn to_log(&self, jenkins_client: &Jenkins) -> Result<Log> {
-        Ok(Log {
+    fn as_run(&self, jenkins_client: &Jenkins) -> Result<Run> {
+        Ok(Run {
             id: None,
             build_url: self.url().to_string(),
-            data: self
-                .get_console(jenkins_client)
-                .map_err(Error::from_boxed)?,
+            display_name: self.full_display_name_or_default().to_string(),
+            status: self.build_status(),
+            log: Some(
+                self.get_console(jenkins_client)
+                    .map_err(Error::from_boxed)?,
+            ),
         })
     }
 }

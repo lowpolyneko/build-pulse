@@ -10,7 +10,7 @@ use log::{info, warn};
 use rayon::prelude::*;
 
 use crate::{
-    api::{SparseMatrixProject, ToLog},
+    api::{AsRun, HasBuildFields, SparseMatrixProject},
     config::Config,
     db::Database,
     parse::{IssuePatterns, Parse},
@@ -43,16 +43,16 @@ fn pull_build_logs(
         .par_iter()
         .try_for_each(|job| match &job.last_build {
             Some(build) => build.runs.par_iter().try_for_each(|mb| {
-                let x = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
+                let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
 
-                match x.result {
-                    Some(BuildStatus::Failure) => match db.lock().get_log(&x.url) {
+                match full_mb.result {
+                    Some(BuildStatus::Failure) => match db.lock().get_run(&full_mb.url) {
                         Ok(_) => {
                             warn!(
                                 "Job '{}{}' run '{}' failed and was previously cached.",
                                 job.name,
                                 build.display_name,
-                                x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                                full_mb.full_display_name_or_default()
                             );
                             Ok(())
                         }
@@ -61,11 +61,11 @@ fn pull_build_logs(
                                 "Job '{}{}' run '{}' is a fresh failure. Processing log...",
                                 job.name,
                                 build.display_name,
-                                x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                                full_mb.full_display_name_or_default()
                             );
-                            let log = db.lock().insert_log(x.to_log(jenkins)?)?;
-                            log.grep_issues(patterns).try_for_each(|i| {
-                                db.lock().insert_issue(&log, i)?;
+                            let run = db.lock().insert_run(full_mb.as_run(jenkins)?)?;
+                            run.grep_issues(patterns).try_for_each(|i| {
+                                db.lock().insert_issue(&run, i)?;
 
                                 Ok(())
                             })
@@ -74,7 +74,7 @@ fn pull_build_logs(
                             "Failed to query database for Job '{}{}' run '{}' log.",
                             job.name,
                             build.display_name,
-                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                            full_mb.full_display_name_or_default()
                         ),
                     },
                     Some(BuildStatus::Success) => {
@@ -82,7 +82,7 @@ fn pull_build_logs(
                             "Job '{}{}' run '{}' succeeded.",
                             job.name,
                             build.display_name,
-                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                            full_mb.full_display_name_or_default()
                         );
                         Ok::<_, Error>(())
                     }
@@ -91,7 +91,7 @@ fn pull_build_logs(
                             "Job '{}{}' run '{}' not ran.",
                             job.name,
                             build.display_name,
-                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                            full_mb.full_display_name_or_default()
                         );
                         Ok::<_, Error>(())
                     }
@@ -100,7 +100,7 @@ fn pull_build_logs(
                             "Job '{}{}' run '{}' has runtime errors!",
                             job.name,
                             build.display_name,
-                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                            full_mb.full_display_name_or_default()
                         );
                         Ok::<_, Error>(())
                     }
