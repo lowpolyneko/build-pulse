@@ -2,10 +2,10 @@
 
 use std::{fs, sync::ReentrantLock};
 
-use anyhow::{Error, Result};
+use anyhow::{Error, Result, bail};
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
-use jenkins_api::{JenkinsBuilder, build::BuildStatus};
+use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
 use log::{info, warn};
 use rayon::prelude::*;
 
@@ -32,6 +32,87 @@ struct Args {
     output: Option<String>,
 }
 
+fn pull_build_logs(
+    project: &SparseMatrixProject,
+    patterns: &IssuePatterns,
+    jenkins: &Jenkins,
+    db: &ReentrantLock<Database>,
+) -> Result<()> {
+    project
+        .jobs
+        .par_iter()
+        .try_for_each(|job| match &job.last_build {
+            Some(build) => build.runs.par_iter().try_for_each(|mb| {
+                let x = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
+
+                match x.result {
+                    Some(BuildStatus::Failure) => match db.lock().get_log(&x.url) {
+                        Ok(_) => {
+                            warn!(
+                                "Job '{}{}' run '{}' failed and was previously cached.",
+                                job.name,
+                                build.display_name,
+                                x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                            );
+                            Ok(())
+                        }
+                        Err(rusqlite::Error::QueryReturnedNoRows) => {
+                            warn!(
+                                "Job '{}{}' run '{}' is a fresh failure. Processing log...",
+                                job.name,
+                                build.display_name,
+                                x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                            );
+                            let log = db.lock().insert_log(x.to_log(jenkins)?)?;
+                            log.grep_issues(patterns).try_for_each(|i| {
+                                db.lock().insert_issue(&log, i)?;
+
+                                Ok(())
+                            })
+                        }
+                        _ => bail!(
+                            "Failed to query database for Job '{}{}' run '{}' log.",
+                            job.name,
+                            build.display_name,
+                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                        ),
+                    },
+                    Some(BuildStatus::Success) => {
+                        info!(
+                            "Job '{}{}' run '{}' succeeded.",
+                            job.name,
+                            build.display_name,
+                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                        );
+                        Ok::<_, Error>(())
+                    }
+                    Some(BuildStatus::Aborted | BuildStatus::NotBuilt) | None => {
+                        info!(
+                            "Job '{}{}' run '{}' not ran.",
+                            job.name,
+                            build.display_name,
+                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                        );
+                        Ok::<_, Error>(())
+                    }
+                    Some(BuildStatus::Unstable) => {
+                        warn!(
+                            "Job '{}{}' run '{}' has runtime errors!",
+                            job.name,
+                            build.display_name,
+                            x.full_display_name.as_ref().unwrap_or(&x.display_name)
+                        );
+                        Ok::<_, Error>(())
+                    }
+                }
+            }),
+            None => {
+                info!("Job '{}' has no builds.", job.name);
+                Ok(())
+            }
+        })
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -46,7 +127,7 @@ fn main() -> Result<()> {
 
     // open db
     info!("Opening database...");
-    let database = ReentrantLock::new(Database::open(&config.database)?);
+    let database = Database::open(&config.database)?;
 
     info!(
         "Pulling associated jobs for {} from {}...",
@@ -60,62 +141,17 @@ fn main() -> Result<()> {
     }
     .build()
     .map_err(Error::from_boxed)?;
-    let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
     info!("Pulling build info for each job...");
     info!("----------------------------------------");
 
-    project.jobs.iter().try_for_each(|job| {
-        info!("Job {}", job.name);
-        if let Some(build) = &job.last_build {
-            info!("Last build for job {} is {}", job.name, build.display_name);
-            build.runs.par_iter().try_for_each(|mb| {
-                let x = mb.get_full_build(&jenkins).map_err(Error::from_boxed)?;
-                if let Some(log) = match x.result {
-                    Some(BuildStatus::Failure) => match database.lock().get_log(&x.url) {
-                        Ok(log) => {
-                            info!("Cached log");
-                            Some(log)
-                        }
-                        Err(rusqlite::Error::QueryReturnedNoRows) => {
-                            warn!("Fresh log, grabbing...");
-                            let log = database.lock().insert_log(x.to_log(&jenkins)?)?;
-                            log.grep_issues(&issue_patterns).try_for_each(|i| {
-                                database.lock().insert_issue(&log, i)?;
+    let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
-                                Ok::<_, Error>(())
-                            })?;
-                            Some(log)
-                        }
-                        _ => panic!("Failed to get log"),
-                    },
-                    Some(BuildStatus::Success) => {
-                        info!("Run is ok.");
-                        None
-                    }
-                    Some(BuildStatus::Aborted | BuildStatus::NotBuilt) | None => {
-                        info!("Run not finished.");
-                        None
-                    }
-                    Some(BuildStatus::Unstable) => {
-                        warn!("Run has runtime errors!");
-                        None
-                    }
-                } {
-                    // Get cached issues
-                    warn!(
-                        "Run failed with {} found issues!",
-                        database.lock().get_issues(&log)?.len()
-                    )
-                }
+    let database = ReentrantLock::new(database);
+    pull_build_logs(&project, &issue_patterns, &jenkins, &database)?;
+    let database = database.into_inner();
 
-                Ok::<_, Error>(())
-            })?;
-            info!("----------------------------------------");
-        }
-
-        Ok::<_, Error>(())
-    })?;
+    info!("----------------------------------------");
 
     info!("Generating report...");
 
