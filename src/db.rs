@@ -1,5 +1,5 @@
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Result, ToSql, types::ToSqlOutput};
+use rusqlite::{Connection, Result};
 
 use crate::parse::Parse;
 
@@ -22,7 +22,7 @@ pub struct Issue<'a> {
 
 impl Parse for Run {
     fn data(&self) -> &str {
-        self.log.as_ref().map_or("", |s| s.as_str())
+        self.log.as_ref().map_or("", |s| &s)
     }
 }
 
@@ -63,8 +63,8 @@ impl Database {
         self.conn.execute(
             "INSERT INTO runs (build_url, display_name, status, log) VALUES (?, ?, ?, ?)",
             (
-                run.build_url.as_str(),
-                run.display_name.as_str(),
+                &run.build_url,
+                &run.display_name,
                 run.status.map(|s| match s {
                     BuildStatus::Aborted => "aborted",
                     BuildStatus::Failure => "failure",
@@ -72,7 +72,7 @@ impl Database {
                     BuildStatus::Success => "success",
                     BuildStatus::Unstable => "unstable",
                 }),
-                run.log.as_ref(),
+                &run.log,
             ),
         )?;
         run.id = Some(self.conn.last_insert_rowid());

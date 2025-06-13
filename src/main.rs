@@ -122,7 +122,7 @@ fn main() -> Result<()> {
 
     // load config
     info!("Compiling issue patterns...");
-    let config: Config = toml::from_str(fs::read_to_string(args.config)?.as_str())?;
+    let config: Config = toml::from_str(&fs::read_to_string(args.config)?)?;
     let issue_patterns = IssuePatterns::load_regex(&config.issue)?;
 
     // open db
@@ -136,7 +136,7 @@ fn main() -> Result<()> {
 
     let jenkins = JenkinsBuilder::new(&config.jenkins_url);
     let jenkins = match config.username {
-        Some(user) => jenkins.with_user(user.as_str(), config.password.as_deref()),
+        Some(user) => jenkins.with_user(&user, config.password.as_deref()),
         None => jenkins,
     }
     .build()
