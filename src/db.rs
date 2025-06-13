@@ -97,8 +97,7 @@ impl Database {
     }
 
     pub fn get_issues<'a>(&self, log: &'a Log) -> Result<Vec<Issue<'a>>> {
-        Ok(self
-            .conn
+        self.conn
             .prepare("SELECT id, snippet_start, snippet_end, log_id FROM issues WHERE log_id = ?")?
             .query_map((log.id.expect("Log has not been committed!"),), |row| {
                 Ok(Issue {
@@ -106,6 +105,6 @@ impl Database {
                     snippet: &log.data[row.get(1)?..row.get(2)?],
                 })
             })?
-            .collect::<Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()
     }
 }

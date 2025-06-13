@@ -1,7 +1,8 @@
+use anyhow::{Error, Result};
 use jenkins_api::{
     Jenkins,
     build::{Build, BuildStatus, ShortBuild},
-    client::{Path, Result, TreeBuilder},
+    client::{Path, TreeBuilder},
     job::Job,
 };
 use serde::Deserialize;
@@ -60,34 +61,38 @@ where
         Ok(Log {
             id: None,
             build_url: self.url().to_string(),
-            data: self.get_console(jenkins_client)?,
+            data: self
+                .get_console(jenkins_client)
+                .map_err(Error::from_boxed)?,
         })
     }
 }
 
 impl SparseMatrixProject {
     pub fn pull_jobs(client: &Jenkins, project_name: &str) -> Result<Self> {
-        client.get_object_as(
-            Path::View { name: project_name },
-            TreeBuilder::new()
-                .with_field(
-                    TreeBuilder::object("jobs")
-                        .with_subfield("name")
-                        .with_subfield("url")
-                        .with_subfield(
-                            TreeBuilder::object("lastBuild")
-                                .with_subfield("url")
-                                .with_subfield("displayName")
-                                .with_subfield("timestamp")
-                                .with_subfield("result")
-                                .with_subfield(
-                                    TreeBuilder::object("runs")
-                                        .with_subfield("url")
-                                        .with_subfield("number"),
-                                ),
-                        ),
-                )
-                .build(),
-        )
+        client
+            .get_object_as(
+                Path::View { name: project_name },
+                TreeBuilder::new()
+                    .with_field(
+                        TreeBuilder::object("jobs")
+                            .with_subfield("name")
+                            .with_subfield("url")
+                            .with_subfield(
+                                TreeBuilder::object("lastBuild")
+                                    .with_subfield("url")
+                                    .with_subfield("displayName")
+                                    .with_subfield("timestamp")
+                                    .with_subfield("result")
+                                    .with_subfield(
+                                        TreeBuilder::object("runs")
+                                            .with_subfield("url")
+                                            .with_subfield("number"),
+                                    ),
+                            ),
+                    )
+                    .build(),
+            )
+            .map_err(Error::from_boxed)
     }
 }

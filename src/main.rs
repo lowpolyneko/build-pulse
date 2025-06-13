@@ -1,5 +1,6 @@
-use std::{error::Error, fs, sync::Mutex};
+use std::{fs, sync::Mutex};
 
+use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
 use jenkins_api::{JenkinsBuilder, build::BuildStatus};
@@ -29,7 +30,7 @@ struct Args {
     output: Option<String>,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<()> {
     let args = Args::parse();
 
     // initialize logging
@@ -50,12 +51,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         config.project, config.jenkins_url
     );
 
+    let jenkins = JenkinsBuilder::new(&config.jenkins_url);
     let jenkins = match config.username {
-        Some(user) => JenkinsBuilder::new(&config.jenkins_url)
-            .with_user(user.as_str(), config.password.as_deref())
-            .build()?,
-        None => JenkinsBuilder::new(&config.jenkins_url).build()?,
-    };
+        Some(user) => jenkins.with_user(user.as_str(), config.password.as_deref()),
+        None => jenkins,
+    }
+    .build()
+    .map_err(Error::from_boxed)?;
     let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
     info!("Pulling build info for each job...");

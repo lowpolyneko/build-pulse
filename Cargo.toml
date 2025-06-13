@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.98"
 clap = { version = "4.5.39", features = ["cargo", "derive"] }
 env_logger = "0.11.8"
-jenkins_api = "0.8.0"
+jenkins_api = { git = "https://github.com/lowpolyneko/jenkins-api.rs.git", branch = "feature/send-sync" }
 log = "0.4.27"
 maud = "0.27.0"
 rayon = "1.10.0"
