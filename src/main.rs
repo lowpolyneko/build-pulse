@@ -1,4 +1,6 @@
-use std::{fs, sync::Mutex};
+#![feature(reentrant_lock)]
+
+use std::{fs, sync::ReentrantLock};
 
 use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
@@ -44,7 +46,7 @@ fn main() -> Result<()> {
 
     // open db
     info!("Opening database...");
-    let database = Mutex::new(Database::open(&config.database)?);
+    let database = ReentrantLock::new(Database::open(&config.database)?);
 
     info!(
         "Pulling associated jobs for {} from {}...",
@@ -70,16 +72,16 @@ fn main() -> Result<()> {
             build.runs.par_iter().try_for_each(|mb| {
                 let x = mb.get_full_build(&jenkins).map_err(Error::from_boxed)?;
                 if let Some(log) = match x.result {
-                    Some(BuildStatus::Failure) => match database.lock().unwrap().get_log(&x.url) {
+                    Some(BuildStatus::Failure) => match database.lock().get_log(&x.url) {
                         Ok(log) => {
                             info!("Cached log");
                             Some(log)
                         }
                         Err(rusqlite::Error::QueryReturnedNoRows) => {
                             warn!("Fresh log, grabbing...");
-                            let log = database.lock().unwrap().insert_log(x.to_log(&jenkins)?)?;
+                            let log = database.lock().insert_log(x.to_log(&jenkins)?)?;
                             log.grep_issues(&issue_patterns).try_for_each(|i| {
-                                database.lock().unwrap().insert_issue(&log, i)?;
+                                database.lock().insert_issue(&log, i)?;
 
                                 Ok::<_, Error>(())
                             })?;
@@ -103,8 +105,8 @@ fn main() -> Result<()> {
                     // Get cached issues
                     warn!(
                         "Run failed with {} found issues!",
-                        database.lock().unwrap().get_issues(&log)?.len()
-                    );
+                        database.lock().get_issues(&log)?.len()
+                    )
                 }
 
                 Ok::<_, Error>(())
