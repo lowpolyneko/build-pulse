@@ -63,12 +63,12 @@ fn main() -> Result<()> {
     info!("Pulling build info for each job...");
     info!("----------------------------------------");
 
-    project.jobs.iter().for_each(|job| {
+    project.jobs.iter().try_for_each(|job| {
         info!("Job {}", job.name);
         if let Some(build) = &job.last_build {
             info!("Last build for job {} is {}", job.name, build.display_name);
-            build.runs.par_iter().for_each(|mb| {
-                let x = mb.get_full_build(&jenkins).expect("Failed to get build");
+            build.runs.par_iter().try_for_each(|mb| {
+                let x = mb.get_full_build(&jenkins).map_err(Error::from_boxed)?;
                 if let Some(log) = match x.result {
                     Some(BuildStatus::Failure) => match database.lock().unwrap().get_log(&x.url) {
                         Ok(log) => {
@@ -77,18 +77,12 @@ fn main() -> Result<()> {
                         }
                         Err(rusqlite::Error::QueryReturnedNoRows) => {
                             warn!("Fresh log, grabbing...");
-                            let log = database
-                                .lock()
-                                .unwrap()
-                                .insert_log(x.to_log(&jenkins).expect("Failed to download log"))
-                                .expect("Failed to insert log");
-                            log.grep_issues(&issue_patterns).for_each(|i| {
-                                database
-                                    .lock()
-                                    .unwrap()
-                                    .insert_issue(&log, i)
-                                    .expect("Failed to insert issue");
-                            });
+                            let log = database.lock().unwrap().insert_log(x.to_log(&jenkins)?)?;
+                            log.grep_issues(&issue_patterns).try_for_each(|i| {
+                                database.lock().unwrap().insert_issue(&log, i)?;
+
+                                Ok::<_, Error>(())
+                            })?;
                             Some(log)
                         }
                         _ => panic!("Failed to get log"),
@@ -109,18 +103,17 @@ fn main() -> Result<()> {
                     // Get cached issues
                     warn!(
                         "Run failed with {} found issues!",
-                        database
-                            .lock()
-                            .unwrap()
-                            .get_issues(&log)
-                            .expect("Failed to select issues")
-                            .len()
+                        database.lock().unwrap().get_issues(&log)?.len()
                     );
                 }
-            });
+
+                Ok::<_, Error>(())
+            })?;
             info!("----------------------------------------");
         }
-    });
+
+        Ok::<_, Error>(())
+    })?;
 
     info!("Generating report...");
 
