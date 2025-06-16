@@ -7,6 +7,24 @@ use crate::{
 };
 
 fn render_job(job: &SparseJob, db: &Database) -> Markup {
+    let sorted_runs = job.last_build.as_ref().map(|j| {
+        let mut runs = j
+            .runs
+            .iter()
+            .filter(|r| r.number == j.number)
+            .map(|r| db.get_run(&r.url).expect("Expecting valid run here..."))
+            .collect::<Vec<_>>();
+        runs.sort_by_key(|r| match r.status {
+            Some(BuildStatus::Failure) => 0,
+            Some(BuildStatus::Unstable) => 1,
+            Some(BuildStatus::Success) => 2,
+            Some(BuildStatus::NotBuilt | BuildStatus::Aborted) => 3,
+            None => 4,
+        });
+
+        runs
+    });
+
     html! {
         h2 {
             a href=(job.url()) {
@@ -36,11 +54,10 @@ fn render_job(job: &SparseJob, db: &Database) -> Markup {
             }
             details open="true" {
                 table style="border: 1px solid black;" {
-                    @for run in build.runs
-                                     .iter()
-                                     .filter(|r| r.number == build.number)
-                                     .map(|r| db.get_run(&r.url)) {
-                        (render_run(&run.expect("Expecting valid run here..."), &db))
+                    @if let Some(runs) = sorted_runs {
+                        @for run in runs {
+                            (render_run(&run, &db))
+                        }
                     }
                 }
             }
