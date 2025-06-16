@@ -67,7 +67,7 @@ fn pull_build_logs(
                         r.status
                     );
 
-                    Ok::<_, Error>(())
+                    Ok(())
                 } // cached
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
                     // retrieve the log and parse the issues
@@ -96,7 +96,7 @@ fn pull_build_logs(
                         committed_run.status
                     );
 
-                    Ok::<_, Error>(())
+                    Ok(())
                 }
                 Err(e) => Err(Error::from(e)),
             }

@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Error, Result};
+use rusqlite::{Connection, Result};
 
 use crate::parse::{Tag, TagSet};
 
@@ -129,7 +129,7 @@ impl Database {
             self.conn
                 .execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (t.name,))?;
 
-            Ok::<_, Error>(InDatabase::new(self.conn.last_insert_rowid(), t))
+            Ok(InDatabase::new(self.conn.last_insert_rowid(), t))
         })
     }
 
@@ -174,7 +174,7 @@ impl Database {
                     }
                 ))
             })?
-            .collect::<Result<Vec<_>, _>>()
+            .collect()
     }
 
     pub fn get_tag(&self, name: &str) -> Result<i64> {
