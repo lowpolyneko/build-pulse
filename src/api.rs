@@ -73,15 +73,20 @@ where
     T: Build + HasBuildFields,
 {
     fn as_run(&self, jenkins_client: &Jenkins) -> Result<Run> {
+        let status = self.build_status();
         Ok(Run {
             id: None,
             build_url: self.url().to_string(),
             display_name: self.full_display_name_or_default().to_string(),
-            status: self.build_status(),
-            log: Some(
-                self.get_console(jenkins_client)
-                    .map_err(Error::from_boxed)?,
-            ),
+            status: status,
+            log: match self.build_status() {
+                Some(BuildStatus::Failure) => Some(
+                    // only get log on failure
+                    self.get_console(jenkins_client)
+                        .map_err(Error::from_boxed)?,
+                ),
+                _ => None,
+            },
         })
     }
 }

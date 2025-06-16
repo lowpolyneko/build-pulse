@@ -1,6 +1,4 @@
-#![feature(reentrant_lock)]
-
-use std::{fs, sync::ReentrantLock};
+use std::{fs, sync::Mutex};
 
 use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
@@ -36,7 +34,7 @@ fn pull_build_logs(
     project: &SparseMatrixProject,
     patterns: &IssuePatterns,
     jenkins: &Jenkins,
-    db: &ReentrantLock<Database>,
+    db: &Mutex<Database>,
 ) -> Result<()> {
     project
         .jobs
@@ -53,7 +51,8 @@ fn pull_build_logs(
         .flat_map(|(job, build)| rayon::iter::repeat((job, build)).zip(&build.runs))
         .try_for_each(|((job, build), mb)| {
             // check if processed first
-            match db.lock().get_run(&mb.url) {
+            let existing_run = db.lock().unwrap().get_run(&mb.url);
+            match existing_run {
                 // check if already processed first
                 Ok(r) => {
                     log!(
@@ -74,23 +73,23 @@ fn pull_build_logs(
                     // retrieve the log and parse the issues
                     let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
                     let run = full_mb.as_run(jenkins)?;
-                    let run = db.lock().insert_run(run)?;
-                    run.grep_issues(patterns).try_for_each(|i| {
-                        db.lock().insert_issue(&run, i)?;
+                    let committed_run = db.lock().unwrap().insert_run(run)?;
+                    committed_run.grep_issues(patterns).try_for_each(|i| {
+                        db.lock().unwrap().insert_issue(&committed_run, i)?;
 
                         Ok::<_, Error>(())
                     })?;
 
                     log!(
-                        match run.status {
+                        match committed_run.status {
                             Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
                             _ => Level::Info,
                         },
                         "Job '{}{}' run '{}' finished with status {:?}.",
                         job.name,
                         build.display_name,
-                        run.display_name,
-                        run.status
+                        committed_run.display_name,
+                        committed_run.status
                     );
 
                     Ok::<_, Error>(())
@@ -134,9 +133,9 @@ fn main() -> Result<()> {
 
     let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
-    let database = ReentrantLock::new(database);
+    let database = Mutex::new(database);
     pull_build_logs(&project, &issue_patterns, &jenkins, &database)?;
-    let database = database.into_inner();
+    let database = database.into_inner().unwrap();
 
     info!("----------------------------------------");
 
