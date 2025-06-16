@@ -52,6 +52,7 @@ fn pull_build_logs(
             )
         })
         .flat_map(|(job, build)| rayon::iter::repeat((job, build)).zip(&build.runs))
+        .filter(|((_, build), mb)| mb.number == build.number)
         .try_for_each(|((job, build), mb)| {
             // check if processed first
             let existing_run = db.lock().unwrap().get_run(&mb.url);

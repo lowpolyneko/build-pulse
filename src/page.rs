@@ -36,7 +36,10 @@ fn render_job(job: &SparseJob, db: &Database) -> Markup {
             }
             details open="true" {
                 table style="border: 1px solid black;" {
-                    @for run in build.runs.iter().map(|r| db.get_run(&r.url)) {
+                    @for run in build.runs
+                                     .iter()
+                                     .filter(|r| r.number == build.number)
+                                     .map(|r| db.get_run(&r.url)) {
                         (render_run(&run.expect("Expecting valid run here..."), &db))
                     }
                 }

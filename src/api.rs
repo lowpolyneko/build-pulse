@@ -25,6 +25,7 @@ pub struct SparseJob {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SparseBuild {
+    pub number: u32,
     pub url: String,
     pub display_name: String,
     pub timestamp: u64,
@@ -102,6 +103,7 @@ impl SparseMatrixProject {
                             .with_subfield("url")
                             .with_subfield(
                                 TreeBuilder::object("lastBuild")
+                                    .with_subfield("number")
                                     .with_subfield("url")
                                     .with_subfield("displayName")
                                     .with_subfield("timestamp")
