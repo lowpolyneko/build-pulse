@@ -2,15 +2,15 @@
 
 use std::{fs, sync::ReentrantLock};
 
-use anyhow::{Error, Result, bail};
+use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
 use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
-use log::{info, warn};
+use log::{Level, info, log};
 use rayon::prelude::*;
 
 use crate::{
-    api::{AsRun, HasBuildFields, SparseMatrixProject},
+    api::{AsRun, SparseMatrixProject},
     config::Config,
     db::Database,
     parse::{IssuePatterns, Parse},
@@ -29,7 +29,7 @@ struct Args {
     config: String,
 
     #[arg(short, long)]
-    output: Option<String>,
+    output: Option<Option<String>>,
 }
 
 fn pull_build_logs(
@@ -41,74 +41,61 @@ fn pull_build_logs(
     project
         .jobs
         .par_iter()
-        .try_for_each(|job| match &job.last_build {
-            Some(build) => build.runs.par_iter().try_for_each(|mb| {
-                let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
+        .filter_map(|job| {
+            job.last_build.as_ref().map_or_else(
+                || {
+                    info!("Job '{}' has no builds.", job.name);
+                    None
+                },
+                |build| Some((job, build)),
+            )
+        })
+        .flat_map(|(job, build)| rayon::iter::repeat((job, build)).zip(&build.runs))
+        .try_for_each(|((job, build), mb)| {
+            // check if processed first
+            match db.lock().get_run(&mb.url) {
+                // check if already processed first
+                Ok(r) => {
+                    log!(
+                        match r.status {
+                            Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
+                            _ => Level::Info,
+                        },
+                        "Job '{}{}' run '{}' already cached with status {:?}",
+                        job.name,
+                        build.display_name,
+                        r.display_name,
+                        r.status
+                    );
 
-                match full_mb.result {
-                    Some(BuildStatus::Failure) => match db.lock().get_run(&full_mb.url) {
-                        Ok(_) => {
-                            warn!(
-                                "Job '{}{}' run '{}' failed and was previously cached.",
-                                job.name,
-                                build.display_name,
-                                full_mb.full_display_name_or_default()
-                            );
-                            Ok(())
-                        }
-                        Err(rusqlite::Error::QueryReturnedNoRows) => {
-                            warn!(
-                                "Job '{}{}' run '{}' is a fresh failure. Processing log...",
-                                job.name,
-                                build.display_name,
-                                full_mb.full_display_name_or_default()
-                            );
-                            let run = db.lock().insert_run(full_mb.as_run(jenkins)?)?;
-                            run.grep_issues(patterns).try_for_each(|i| {
-                                db.lock().insert_issue(&run, i)?;
+                    Ok::<_, Error>(())
+                } // cached
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    // retrieve the log and parse the issues
+                    let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
+                    let run = full_mb.as_run(jenkins)?;
+                    let run = db.lock().insert_run(run)?;
+                    run.grep_issues(patterns).try_for_each(|i| {
+                        db.lock().insert_issue(&run, i)?;
 
-                                Ok(())
-                            })
-                        }
-                        _ => bail!(
-                            "Failed to query database for Job '{}{}' run '{}' log.",
-                            job.name,
-                            build.display_name,
-                            full_mb.full_display_name_or_default()
-                        ),
-                    },
-                    Some(BuildStatus::Success) => {
-                        info!(
-                            "Job '{}{}' run '{}' succeeded.",
-                            job.name,
-                            build.display_name,
-                            full_mb.full_display_name_or_default()
-                        );
                         Ok::<_, Error>(())
-                    }
-                    Some(BuildStatus::Aborted | BuildStatus::NotBuilt) | None => {
-                        info!(
-                            "Job '{}{}' run '{}' not ran.",
-                            job.name,
-                            build.display_name,
-                            full_mb.full_display_name_or_default()
-                        );
-                        Ok::<_, Error>(())
-                    }
-                    Some(BuildStatus::Unstable) => {
-                        warn!(
-                            "Job '{}{}' run '{}' has runtime errors!",
-                            job.name,
-                            build.display_name,
-                            full_mb.full_display_name_or_default()
-                        );
-                        Ok::<_, Error>(())
-                    }
+                    })?;
+
+                    log!(
+                        match run.status {
+                            Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
+                            _ => Level::Info,
+                        },
+                        "Job '{}{}' run '{}' finished with status {:?}.",
+                        job.name,
+                        build.display_name,
+                        run.display_name,
+                        run.status
+                    );
+
+                    Ok::<_, Error>(())
                 }
-            }),
-            None => {
-                info!("Job '{}' has no builds.", job.name);
-                Ok(())
+                Err(e) => Err(Error::from(e)),
             }
         })
 }
@@ -153,20 +140,22 @@ fn main() -> Result<()> {
 
     info!("----------------------------------------");
 
-    info!("Generating report...");
+    if let Some(output) = args.output {
+        info!("Generating report...");
 
-    if let Some(filepath) = args.output {
-        let output = page::render(&project).into_string();
+        let markup = page::render(&project, &database).into_string();
 
-        if filepath.is_empty() {
-            info!("Dumping to stdout --");
-            println!("{output}");
-        } else {
-            fs::write(&filepath, output)?;
+        if let Some(filepath) = output {
+            fs::write(&filepath, markup)?;
 
             info!("Written to {filepath}");
+        } else {
+            info!("Dumping to stdout --");
+            println!("{markup}");
         }
     }
+
+    info!("Done!");
 
     Ok(())
 }

@@ -22,7 +22,7 @@ pub struct Issue<'a> {
 
 impl Parse for Run {
     fn data(&self) -> &str {
-        self.log.as_ref().map_or("", |s| &s)
+        self.log.as_ref().map_or("", |s| s)
     }
 }
 
