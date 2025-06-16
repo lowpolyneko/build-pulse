@@ -66,9 +66,9 @@ impl Database {
                 id              INTEGER PRIMARY KEY,
                 snippet_start   INTEGER NOT NULL,
                 snippet_end     INTEGER NOT NULL,
-                log_id          INTEGER NOT NULL,
+                run_id          INTEGER NOT NULL,
                 tag_id          INTEGER NOT NULL,
-                FOREIGN KEY(log_id)
+                FOREIGN KEY(run_id)
                     REFERENCES runs(id),
                 FOREIGN KEY(tag_id)
                     REFERENCES tags(id)
@@ -117,7 +117,7 @@ impl Database {
                 .offset_from_unsigned(run.log.as_ref().unwrap().as_ptr());
             let end = start + issue.snippet.len();
             self.conn.execute(
-                "INSERT INTO issues (snippet_start, snippet_end, log_id, tag_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO issues (snippet_start, snippet_end, run_id, tag_id) VALUES (?, ?, ?, ?)",
                 (start, end, run.id, issue.tag),
             )?;
         }
@@ -160,7 +160,7 @@ impl Database {
 
     pub fn get_issues<'a>(&self, run: &'a InDatabase<Run>) -> Result<Vec<InDatabase<Issue<'a>>>> {
         self.conn
-            .prepare("SELECT id, snippet_start, snippet_end, log_id, tag_id FROM issues WHERE log_id = ?")?
+            .prepare("SELECT id, snippet_start, snippet_end, run_id, tag_id FROM issues WHERE run_id = ?")?
             .query_map((run.id,), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
