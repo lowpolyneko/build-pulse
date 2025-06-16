@@ -4,7 +4,7 @@ use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
 use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
-use log::{Level, info, log};
+use log::{Level, info, log, warn};
 use rayon::prelude::*;
 
 use crate::{
@@ -28,6 +28,9 @@ struct Args {
 
     #[arg(short, long)]
     output: Option<Option<String>>,
+
+    #[arg(short, long)]
+    purge_cache: bool,
 }
 
 fn pull_build_logs(
@@ -118,6 +121,12 @@ fn main() -> Result<()> {
     // open db
     info!("Opening database...");
     let database = Database::open(&config.database)?;
+
+    // check for cache purge
+    if args.purge_cache {
+        warn!("Purging cache!");
+        database.purge_cache()?;
+    }
 
     // update TagSet
     info!("Updating tags...");

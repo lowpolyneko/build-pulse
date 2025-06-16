@@ -183,4 +183,16 @@ impl Database {
                 row.get(0)
             })
     }
+
+    pub fn purge_cache(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "
+            BEGIN;
+            DELETE FROM runs;
+            DELETE FROM issues;
+            DELETE FROM tags;
+            COMMIT;
+            ",
+        )
+    }
 }
