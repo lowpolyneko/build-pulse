@@ -7,11 +7,18 @@ pub struct Config {
     pub username: Option<String>,
     pub password: Option<String>,
     pub database: String,
-    pub issue: Vec<ConfigIssue>,
+    pub tag: Vec<ConfigTag>,
 }
 
 #[derive(Deserialize)]
-pub struct ConfigIssue {
+pub struct ConfigTag {
     pub name: String,
+    pub desc: String,
     pub pattern: String,
+    pub from: Field,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+pub enum Field {
+    Console,
 }

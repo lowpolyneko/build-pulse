@@ -1,6 +1,5 @@
 /target
 .direnv/
 report.html
-config.toml
 data.db
 log.txt

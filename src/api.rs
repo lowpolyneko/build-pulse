@@ -75,11 +75,10 @@ where
     fn as_run(&self, jenkins_client: &Jenkins) -> Result<Run> {
         let status = self.build_status();
         Ok(Run {
-            id: None,
             build_url: self.url().to_string(),
             display_name: self.full_display_name_or_default().to_string(),
-            status: status,
-            log: match self.build_status() {
+            status,
+            log: match status {
                 Some(BuildStatus::Failure) => Some(
                     // only get log on failure
                     self.get_console(jenkins_client)

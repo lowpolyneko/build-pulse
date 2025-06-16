@@ -3,7 +3,7 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::{
     api::{SparseJob, SparseMatrixProject},
-    db::{Database, Run},
+    db::{Database, InDatabase, Run},
 };
 
 fn render_job(job: &SparseJob, db: &Database) -> Markup {
@@ -49,7 +49,7 @@ fn render_job(job: &SparseJob, db: &Database) -> Markup {
     }
 }
 
-fn render_run(run: &Run, db: &Database) -> Markup {
+fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
     html! {
         tr style="border: 1px solid black;" {
             td style="border: 1px solid black;" { // status

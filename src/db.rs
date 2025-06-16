@@ -1,14 +1,15 @@
-use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Result};
+use std::ops::{Deref, DerefMut};
 
-use crate::parse::Parse;
+use jenkins_api::build::BuildStatus;
+use rusqlite::{Connection, Error, Result};
+
+use crate::parse::{Tag, TagSet};
 
 pub struct Database {
     conn: Connection,
 }
 
 pub struct Run {
-    pub id: Option<i64>,
     pub build_url: String,
     pub display_name: String,
     pub status: Option<BuildStatus>,
@@ -16,13 +17,32 @@ pub struct Run {
 }
 
 pub struct Issue<'a> {
-    pub id: Option<i64>,
     pub snippet: &'a str,
+    pub tag: i64,
 }
 
-impl Parse for Run {
-    fn data(&self) -> &str {
-        self.log.as_ref().map_or("", |s| s)
+pub struct InDatabase<T> {
+    pub id: i64,
+    item: T,
+}
+
+impl<T> InDatabase<T> {
+    fn new(id: i64, item: T) -> Self {
+        InDatabase { id, item }
+    }
+}
+
+impl<T> Deref for InDatabase<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
+}
+
+impl<T> DerefMut for InDatabase<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.item
     }
 }
 
@@ -47,8 +67,16 @@ impl Database {
                 snippet_start   INTEGER NOT NULL,
                 snippet_end     INTEGER NOT NULL,
                 log_id          INTEGER NOT NULL,
+                tag_id          INTEGER NOT NULL,
                 FOREIGN KEY(log_id)
-                    REFERENCES runs(id)
+                    REFERENCES runs(id),
+                FOREIGN KEY(tag_id)
+                    REFERENCES tags(id)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS tags (
+                id              INTEGER PRIMARY KEY,
+                name            TEXT NOT NULL,
+                UNIQUE(name)
             ) STRICT;
             COMMIT;
             ",
@@ -57,9 +85,7 @@ impl Database {
         Ok(Database { conn })
     }
 
-    pub fn insert_run(&self, mut run: Run) -> Result<Run> {
-        assert!(run.id.is_none(), "Run has a pre-existing id!");
-
+    pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
         self.conn.execute(
             "INSERT INTO runs (build_url, display_name, status, log) VALUES (?, ?, ?, ?)",
             (
@@ -75,14 +101,14 @@ impl Database {
                 &run.log,
             ),
         )?;
-        run.id = Some(self.conn.last_insert_rowid());
-        Ok(run)
+        Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
     }
 
-    pub fn insert_issue<'a>(&self, run: &'a Run, mut issue: Issue<'a>) -> Result<Issue<'a>> {
-        assert!(issue.id.is_none(), "Issue has a pre-existing id!");
-        assert!(run.log.is_some(), "Issue references non-existant log!");
-
+    pub fn insert_issue<'a>(
+        &self,
+        run: &'a InDatabase<Run>,
+        issue: Issue<'a>,
+    ) -> Result<InDatabase<Issue<'a>>> {
         unsafe {
             // SAFETY: `Run` owns all underlying `Issue`s
             let start = issue
@@ -91,50 +117,70 @@ impl Database {
                 .offset_from_unsigned(run.log.as_ref().unwrap().as_ptr());
             let end = start + issue.snippet.len();
             self.conn.execute(
-                "INSERT INTO issues (snippet_start, snippet_end, log_id) VALUES (?, ?, ?)",
-                (start, end, run.id),
+                "INSERT INTO issues (snippet_start, snippet_end, log_id, tag_id) VALUES (?, ?, ?, ?)",
+                (start, end, run.id, issue.tag),
             )?;
         }
-        issue.id = Some(self.conn.last_insert_rowid());
-        Ok(issue)
+        Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
 
-    pub fn get_run(&self, build_url: &str) -> Result<Run> {
+    pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
+        tags.try_swap_tags(|t| {
+            self.conn
+                .execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (t.name,))?;
+
+            Ok::<_, Error>(InDatabase::new(self.conn.last_insert_rowid(), t))
+        })
+    }
+
+    pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
         self.conn.query_one(
             "SELECT id, build_url, display_name, status, log FROM runs WHERE build_url = ?",
             (build_url,),
             |row| {
-                Ok(Run {
-                    id: row.get(0)?,
-                    build_url: row.get(1)?,
-                    display_name: row.get(2)?,
-                    status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
-                        "aborted" => BuildStatus::Aborted,
-                        "failure" => BuildStatus::Failure,
-                        "not_built" => BuildStatus::NotBuilt,
-                        "success" => BuildStatus::Success,
-                        "unstable" => BuildStatus::Unstable,
-                        _ => panic!("Failed to serialize run status!"),
-                    }),
-                    log: row.get(4)?,
-                })
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Run {
+                        build_url: row.get(1)?,
+                        display_name: row.get(2)?,
+                        status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
+                            "aborted" => BuildStatus::Aborted,
+                            "failure" => BuildStatus::Failure,
+                            "not_built" => BuildStatus::NotBuilt,
+                            "success" => BuildStatus::Success,
+                            "unstable" => BuildStatus::Unstable,
+                            _ => panic!("Failed to serialize run status!"),
+                        }),
+                        log: row.get(4)?,
+                    },
+                ))
             },
         )
     }
 
-    pub fn get_issues<'a>(&self, run: &'a Run) -> Result<Vec<Issue<'a>>> {
+    pub fn get_issues<'a>(&self, run: &'a InDatabase<Run>) -> Result<Vec<InDatabase<Issue<'a>>>> {
         self.conn
-            .prepare("SELECT id, snippet_start, snippet_end, log_id FROM issues WHERE log_id = ?")?
-            .query_map((run.id.expect("Log has not been committed!"),), |row| {
-                Ok(Issue {
-                    id: Some(row.get(0)?),
-                    snippet: &run
-                        .log
-                        .as_ref()
-                        .expect("Issue references non-existant log!")
-                        [row.get(1)?..row.get(2)?],
-                })
+            .prepare("SELECT id, snippet_start, snippet_end, log_id, tag_id FROM issues WHERE log_id = ?")?
+            .query_map((run.id,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Issue {
+                        snippet: &run
+                            .log
+                            .as_ref()
+                            .expect("Issue references non-existant log!")
+                            [row.get(1)?..row.get(2)?],
+                        tag: row.get(4)?,
+                    }
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub fn get_tag(&self, name: &str) -> Result<i64> {
+        self.conn
+            .query_one("SELECT id, name FROM tags WHERE name = ?", (name,), |row| {
+                row.get(0)
+            })
     }
 }

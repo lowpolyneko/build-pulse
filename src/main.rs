@@ -10,8 +10,8 @@ use rayon::prelude::*;
 use crate::{
     api::{AsRun, SparseMatrixProject},
     config::Config,
-    db::Database,
-    parse::{IssuePatterns, Parse},
+    db::{Database, InDatabase},
+    parse::{Tag, TagSet},
 };
 
 mod api;
@@ -32,7 +32,7 @@ struct Args {
 
 fn pull_build_logs(
     project: &SparseMatrixProject,
-    patterns: &IssuePatterns,
+    tags: &TagSet<InDatabase<Tag>>,
     jenkins: &Jenkins,
     db: &Mutex<Database>,
 ) -> Result<()> {
@@ -74,11 +74,15 @@ fn pull_build_logs(
                     let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
                     let run = full_mb.as_run(jenkins)?;
                     let committed_run = db.lock().unwrap().insert_run(run)?;
-                    committed_run.grep_issues(patterns).try_for_each(|i| {
-                        db.lock().unwrap().insert_issue(&committed_run, i)?;
+                    if let Some(failure_log) = &committed_run.log {
+                        tags.grep_tags(failure_log)
+                            .flat_map(|t| t.grep_issue(&failure_log))
+                            .try_for_each(|i| {
+                                db.lock().unwrap().insert_issue(&committed_run, i)?;
 
-                        Ok::<_, Error>(())
-                    })?;
+                                Ok::<_, Error>(())
+                            })?;
+                    };
 
                     log!(
                         match committed_run.status {
@@ -109,11 +113,15 @@ fn main() -> Result<()> {
     // load config
     info!("Compiling issue patterns...");
     let config: Config = toml::from_str(&fs::read_to_string(args.config)?)?;
-    let issue_patterns = IssuePatterns::load_regex(&config.issue)?;
+    let tags = TagSet::from_config(&config.tag)?;
 
     // open db
     info!("Opening database...");
     let database = Database::open(&config.database)?;
+
+    // update TagSet
+    info!("Updating tags...");
+    let tags = database.insert_tags(tags)?;
 
     info!(
         "Pulling associated jobs for {} from {}...",
@@ -134,7 +142,7 @@ fn main() -> Result<()> {
     let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
     let database = Mutex::new(database);
-    pull_build_logs(&project, &issue_patterns, &jenkins, &database)?;
+    pull_build_logs(&project, &tags, &jenkins, &database)?;
     let database = database.into_inner().unwrap();
 
     info!("----------------------------------------");
