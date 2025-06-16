@@ -15,7 +15,7 @@ desc = "GCC Compiler Warning"
 #  <indented followups>\n
 # <make error>
 # https://www.gnu.org/prep/standards/html_node/Errors.html
-pattern = '(?m)^[a-zA-Z0-9_\-./ ]+:[0-9]+(:[0-9]+)?: error: .*(\n\s*.*)*?\nmake.*$'
+pattern = '''(?m)^[a-zA-Z0-9_\-./ ]+:[0-9]+(:[0-9]+)?: error: .*(\n\s*.*)*?\nmake.*$'''
 from = "Console"
 
 [[tag]]
@@ -25,5 +25,12 @@ desc = "./configure failure"
 # Matches messages of the following
 # configure: error: .*\n
 # See `config.log' for more details
-pattern = '''configure: error: .*\nSee `config.log' for more details'''
+pattern = '''(?m)^configure: error: .*\nSee `config.log' for more details$'''
+from = "Console"
+
+[[tag]]
+name = "jenkins_agent_offline"
+desc = "Jenkins Build Agent went offline during the build"
+
+pattern = '''(?m)^Agent went offline during the build$'''
 from = "Console"
