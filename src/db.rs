@@ -21,6 +21,14 @@ pub struct Issue<'a> {
     pub tag: i64,
 }
 
+pub struct Statistics {
+    pub successful: u64,
+    pub unstable: u64,
+    pub failures: u64,
+    pub aborted: u64,
+    pub not_built: u64,
+}
+
 pub struct InDatabase<T> {
     pub id: i64,
     item: T,
@@ -43,6 +51,18 @@ impl<T> Deref for InDatabase<T> {
 impl<T> DerefMut for InDatabase<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.item
+    }
+}
+
+impl Default for Statistics {
+    fn default() -> Self {
+        Statistics {
+            successful: 0,
+            unstable: 0,
+            failures: 0,
+            aborted: 0,
+            not_built: 0,
+        }
     }
 }
 
@@ -182,6 +202,29 @@ impl Database {
             .query_one("SELECT id, name FROM tags WHERE name = ?", (name,), |row| {
                 row.get(0)
             })
+    }
+
+    pub fn get_stats(&self) -> Result<Statistics> {
+        // calculate success/failures for all runs
+        let mut stats = Statistics::default();
+
+        self.conn
+            .prepare("SELECT status,COUNT(*) FROM runs GROUP BY status")?
+            .query_map((), |row| {
+                let count = row.get::<_, u64>(1)?;
+                row.get::<_, Option<String>>(0)?.map(|s| match s.as_str() {
+                    "aborted" => stats.aborted += count,
+                    "failure" => stats.failures += count,
+                    "not_built" => stats.not_built += count,
+                    "success" => stats.successful += count,
+                    "unstable" => stats.unstable += count,
+                    _ => panic!("Failed to serialize run status!"),
+                });
+
+                Ok(())
+            })?;
+
+        Ok(stats)
     }
 
     pub fn purge_cache(&self) -> Result<()> {
