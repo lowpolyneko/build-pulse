@@ -23,9 +23,9 @@ name = "configure_error"
 desc = "./configure failure"
 
 # Matches messages of the following
-# configure: error: .*\n
-# See `config.log' for more details
-pattern = '''(?m)^configure: error: .*\nSee `config.log' for more details$'''
+# configure: error: <message>\n
+# See `<log file>' for more details
+pattern = '''(?m)^configure: error: .*\nSee `[a-zA-Z0-9_\-./ ]+' for more details$'''
 from = "Console"
 
 [[tag]]
