@@ -1,4 +1,7 @@
-use std::ops::Deref;
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    ops::Deref,
+};
 
 use regex::{Regex, RegexSet};
 
@@ -16,6 +19,23 @@ pub struct Tag<'a> {
     pub name: &'a str,
     regex: Regex,
     from: Field,
+}
+
+impl<T> Hash for TagSet<T>
+where
+    T: Hash,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.tags.hash(state);
+    }
+}
+
+impl Hash for Tag<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.regex.as_str().hash(state);
+        self.from.hash(state);
+    }
 }
 
 impl<T> Deref for TagSet<T> {
@@ -64,6 +84,17 @@ impl<T> TagSet<T> {
             .matches(log)
             .into_iter()
             .map(|i| &self.tags[i])
+    }
+}
+
+impl<T> TagSet<T>
+where
+    T: Hash,
+{
+    pub fn schema(&self) -> u64 {
+        let mut s = DefaultHasher::new();
+        self.hash(&mut s);
+        s.finish()
     }
 }
 

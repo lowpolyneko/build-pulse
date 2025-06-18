@@ -87,6 +87,7 @@ where
                 ),
                 _ => None,
             },
+            tag_schema: None,
         })
     }
 }

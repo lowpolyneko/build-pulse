@@ -18,7 +18,7 @@ pub struct ConfigTag {
     pub from: Field,
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, Hash)]
 pub enum Field {
     Console,
 }

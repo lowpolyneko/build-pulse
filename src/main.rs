@@ -35,7 +35,6 @@ struct Args {
 
 fn pull_build_logs(
     project: &SparseMatrixProject,
-    tags: &TagSet<InDatabase<Tag>>,
     jenkins: &Jenkins,
     db: &Mutex<Database>,
 ) -> Result<()> {
@@ -54,39 +53,15 @@ fn pull_build_logs(
         .flat_map(|(job, build)| rayon::iter::repeat((job, build)).zip(&build.runs))
         .filter(|((_, build), mb)| mb.number == build.number)
         .try_for_each(|((job, build), mb)| {
-            // check if processed first
             let existing_run = db.lock().unwrap().get_run(&mb.url);
             match existing_run {
                 // check if already processed first
-                Ok(r) => {
-                    log!(
-                        match r.status {
-                            Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
-                            _ => Level::Info,
-                        },
-                        "Job '{}{}' run '{}' already cached with status {:?}",
-                        job.name,
-                        build.display_name,
-                        r.display_name,
-                        r.status
-                    );
-
-                    Ok(())
-                } // cached
+                Ok(_) => Ok(()), // cached
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    // retrieve the log and parse the issues
+                    // retrieve the log
                     let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
                     let run = full_mb.as_run(jenkins)?;
                     let committed_run = db.lock().unwrap().insert_run(run)?;
-                    if let Some(failure_log) = &committed_run.log {
-                        tags.grep_tags(failure_log)
-                            .flat_map(|t| t.grep_issue(&failure_log))
-                            .try_for_each(|i| {
-                                db.lock().unwrap().insert_issue(&committed_run, i)?;
-
-                                Ok::<_, Error>(())
-                            })?;
-                    };
 
                     log!(
                         match committed_run.status {
@@ -105,6 +80,41 @@ fn pull_build_logs(
                 Err(e) => Err(Error::from(e)),
             }
         })
+}
+
+fn parse_unprocessed_logs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
+    let runs = db.lock().unwrap().get_all_runs()?;
+
+    runs.par_iter()
+        .try_for_each(|run| match (run.tag_schema, &run.log) {
+            (None, Some(log)) => {
+                let count: u64 = tags // only process runs with no schema and a log
+                    .grep_tags(log)
+                    .flat_map(|t| t.grep_issue(&log))
+                    .try_fold(0, |acc, i| {
+                        db.lock().unwrap().insert_issue(&run, i)?;
+                        Ok::<_, Error>(acc + 1)
+                    })?;
+
+                log!(
+                    if count > 0 { Level::Warn } else { Level::Info },
+                    "Found {} issues for {:?} run '{}'",
+                    count,
+                    run.status,
+                    run.display_name
+                );
+
+                Ok::<_, Error>(())
+            }
+            _ => Ok(()),
+        })?;
+
+    // batch update tag schema for runs afterwards
+    db.lock()
+        .unwrap()
+        .update_tag_schema_for_runs(Some(tags.schema()))?;
+
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -133,6 +143,15 @@ fn main() -> Result<()> {
     info!("Updating tags...");
     let tags = database.insert_tags(tags)?;
 
+    // purge outdated issues
+    let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;
+    if outdated > 0 {
+        warn!(
+            "Purged {} issues that parsed with an outdated tag schema!",
+            outdated
+        );
+    }
+
     info!(
         "Pulling associated jobs for {} from {}...",
         config.project, config.jenkins_url
@@ -152,10 +171,18 @@ fn main() -> Result<()> {
     let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
     let database = Mutex::new(database);
-    pull_build_logs(&project, &tags, &jenkins, &database)?;
-    let database = database.into_inner().unwrap();
+    pull_build_logs(&project, &jenkins, &database)?;
 
+    info!("Done!");
     info!("----------------------------------------");
+    info!("Parsing unprocessed run logs...");
+
+    parse_unprocessed_logs(&tags, &database)?;
+
+    info!("Done!");
+    info!("----------------------------------------");
+
+    let database = database.into_inner().unwrap();
 
     if let Some(output) = args.output {
         info!("Generating report...");

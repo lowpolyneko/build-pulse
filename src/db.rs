@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    hash::{self, Hash},
+    ops::{Deref, DerefMut},
+};
 
 use jenkins_api::build::BuildStatus;
 use rusqlite::{Connection, Result};
@@ -14,6 +17,7 @@ pub struct Run {
     pub display_name: String,
     pub status: Option<BuildStatus>,
     pub log: Option<String>,
+    pub tag_schema: Option<u64>,
 }
 
 pub struct Issue<'a> {
@@ -33,6 +37,15 @@ pub struct Statistics {
 pub struct InDatabase<T> {
     pub id: i64,
     item: T,
+}
+
+impl<T> Hash for InDatabase<T>
+where
+    T: Hash,
+{
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.item.hash(state);
+    }
 }
 
 impl<T> InDatabase<T> {
@@ -82,7 +95,8 @@ impl Database {
                 build_url       TEXT NOT NULL,
                 display_name    TEXT NOT NULL,
                 status          TEXT,
-                log             TEXT
+                log             TEXT,
+                tag_schema      INTEGER
             ) STRICT;
             CREATE TABLE IF NOT EXISTS issues (
                 id              INTEGER PRIMARY KEY,
@@ -109,7 +123,7 @@ impl Database {
 
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
         self.conn.execute(
-            "INSERT INTO runs (build_url, display_name, status, log) VALUES (?, ?, ?, ?)",
+            "INSERT INTO runs (build_url, display_name, status, log, tag_schema) VALUES (?, ?, ?, ?, ?)",
             (
                 &run.build_url,
                 &run.display_name,
@@ -121,6 +135,7 @@ impl Database {
                     BuildStatus::Unstable => "unstable",
                 }),
                 &run.log,
+                run.tag_schema.map(u64::cast_signed),
             ),
         )?;
         Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
@@ -157,7 +172,7 @@ impl Database {
 
     pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
         self.conn.query_one(
-            "SELECT id, build_url, display_name, status, log FROM runs WHERE build_url = ?",
+            "SELECT id, build_url, display_name, status, log, tag_schema FROM runs WHERE build_url = ?",
             (build_url,),
             |row| {
                 Ok(InDatabase::new(
@@ -174,10 +189,36 @@ impl Database {
                             _ => panic!("Failed to serialize run status!"),
                         }),
                         log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
                     },
                 ))
             },
         )
+    }
+
+    pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
+        self.conn
+            .prepare("SELECT id, build_url, display_name, status, log, tag_schema FROM runs")?
+            .query_map((), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Run {
+                        build_url: row.get(1)?,
+                        display_name: row.get(2)?,
+                        status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
+                            "aborted" => BuildStatus::Aborted,
+                            "failure" => BuildStatus::Failure,
+                            "not_built" => BuildStatus::NotBuilt,
+                            "success" => BuildStatus::Success,
+                            "unstable" => BuildStatus::Unstable,
+                            _ => panic!("Failed to serialize run status!"),
+                        }),
+                        log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                    },
+                ))
+            })?
+            .collect()
     }
 
     pub fn get_issues<'a>(&self, run: &'a InDatabase<Run>) -> Result<Vec<InDatabase<Issue<'a>>>> {
@@ -235,6 +276,25 @@ impl Database {
             .query_one((), |row| Ok(row.get(0)?))?;
 
         Ok(stats)
+    }
+    pub fn update_tag_schema_for_runs(&self, new_schema: Option<u64>) -> Result<usize> {
+        self.conn.execute(
+            "UPDATE runs SET tag_schema = ?",
+            (new_schema.map(u64::cast_signed),),
+        )
+    }
+
+    pub fn purge_invalid_issues_by_tag_schema(&self, current_schema: u64) -> Result<usize> {
+        self.conn.execute(
+            "DELETE FROM issues WHERE ROWID IN (SELECT i.ROWID FROM issues i INNER JOIN runs r ON i.run_id = r.id WHERE r.tag_schema != ?)",
+            (current_schema.cast_signed(),),
+        )?;
+
+        // also set the run tag_schema to NULL to indicate an unparsed run
+        self.conn.execute(
+            "UPDATE runs SET tag_schema = NULL WHERE tag_schema != ?",
+            (current_schema.cast_signed(),),
+        )
     }
 
     pub fn purge_cache(&self) -> Result<()> {
