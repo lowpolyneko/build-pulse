@@ -162,11 +162,14 @@ impl Database {
     }
 
     pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
-        tags.try_swap_tags(|t| {
-            self.conn
-                .execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (t.name,))?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM tags", ())?;
 
-            Ok(InDatabase::new(self.conn.last_insert_rowid(), t))
+        let mut stmt = tx.prepare_cached("INSERT OR IGNORE INTO tags (name) VALUES (?)")?;
+        tags.try_swap_tags(|t| {
+            stmt.execute((t.name,))?;
+
+            Ok(InDatabase::new(tx.last_insert_rowid(), t))
         })
     }
 
