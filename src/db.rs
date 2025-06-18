@@ -27,6 +27,7 @@ pub struct Statistics {
     pub failures: u64,
     pub aborted: u64,
     pub not_built: u64,
+    pub issues_found: u64,
 }
 
 pub struct InDatabase<T> {
@@ -62,6 +63,7 @@ impl Default for Statistics {
             failures: 0,
             aborted: 0,
             not_built: 0,
+            issues_found: 0,
         }
     }
 }
@@ -206,13 +208,16 @@ impl Database {
 
     pub fn get_stats(&self) -> Result<Statistics> {
         // calculate success/failures for all runs
-        let mut stats = Statistics::default();
-
-        self.conn
+        let mut stats = self
+            .conn
             .prepare("SELECT status,COUNT(*) FROM runs GROUP BY status")?
             .query_map((), |row| {
-                let count = row.get::<_, u64>(1)?;
-                row.get::<_, Option<String>>(0)?.map(|s| match s.as_str() {
+                Ok((row.get::<_, Option<String>>(0)?, row.get::<_, u64>(1)?))
+            })?
+            .collect::<Result<Vec<_>>>()?
+            .iter()
+            .fold(Statistics::default(), |mut stats, (status, count)| {
+                status.as_ref().map(|s| match s.as_str() {
                     "aborted" => stats.aborted += count,
                     "failure" => stats.failures += count,
                     "not_built" => stats.not_built += count,
@@ -221,8 +226,13 @@ impl Database {
                     _ => panic!("Failed to serialize run status!"),
                 });
 
-                Ok(())
-            })?;
+                stats
+            });
+
+        stats.issues_found = self
+            .conn
+            .prepare("SELECT COUNT(*) FROM issues")?
+            .query_one((), |row| Ok(row.get(0)?))?;
 
         Ok(stats)
     }

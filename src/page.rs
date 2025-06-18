@@ -111,6 +111,71 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
     }
 }
 
+pub fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
+    let stats = db
+        .get_stats()
+        .expect("Failed to get statistics from database.");
+    html! {
+        h3 {
+            "Run Statistics"
+        }
+        @let health = project
+                        .jobs
+                        .iter()
+                        .filter_map(|j| j.last_build.as_ref())
+                        .fold(0, |h, b|
+                            h + match b.result {
+                                Some(BuildStatus::Success) => 1,
+                                _ => 0,
+                            }
+        );
+        @let total = project.jobs.len();
+        p {
+            "Overall Job Health:"
+            progress value=(health) max=(total) {}
+            br;
+            (health)
+            " out of "
+            (total)
+            " jobs successful."
+        }
+        p {
+            "Failures: "
+            (stats.failures)
+            " runs"
+        }
+        p {
+            "Unstable: "
+            (stats.unstable)
+            " runs"
+        }
+        p {
+            "Healthy: "
+            (stats.successful)
+            " runs"
+        }
+        p {
+            "Aborted: "
+            (stats.aborted)
+            " runs"
+        }
+        p {
+            "Not Built: "
+            (stats.not_built)
+            " runs"
+        }
+        p {
+            "Total: "
+            (stats.successful + stats.failures + stats.unstable + stats.aborted + stats.not_built)
+            " runs"
+        }
+        b {
+            (stats.issues_found)
+            " issues found!"
+        }
+    }
+}
+
 pub fn render(project: &SparseMatrixProject, db: &Database) -> Markup {
     html! {
         (DOCTYPE)
@@ -122,21 +187,7 @@ pub fn render(project: &SparseMatrixProject, db: &Database) -> Markup {
                 h1 {
                     "Job Status"
                 }
-                @let health = project
-                                .jobs
-                                .iter()
-                                .filter_map(|j| j.last_build.as_ref())
-                                .fold(0, |h, b|
-                                    h + match b.result {
-                                        Some(BuildStatus::Success) => 1,
-                                        _ => 0,
-                                    }
-                );
-                @let total = project.jobs.len();
-                p {
-                    "Health:"
-                    progress value=(health) max=(total) {}
-                }
+                (render_stats(project, db))
                 @for job in &project.jobs {
                     (render_job(job, db))
                 }
