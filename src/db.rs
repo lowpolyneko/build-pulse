@@ -122,22 +122,23 @@ impl Database {
     }
 
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
-        self.conn.execute(
-            "INSERT INTO runs (build_url, display_name, status, log, tag_schema) VALUES (?, ?, ?, ?, ?)",
-            (
-                &run.build_url,
-                &run.display_name,
-                run.status.map(|s| match s {
-                    BuildStatus::Aborted => "aborted",
-                    BuildStatus::Failure => "failure",
-                    BuildStatus::NotBuilt => "not_built",
-                    BuildStatus::Success => "success",
-                    BuildStatus::Unstable => "unstable",
-                }),
-                &run.log,
-                run.tag_schema.map(u64::cast_signed),
-            ),
-        )?;
+        self.conn.prepare_cached(
+            "INSERT INTO runs (build_url, display_name, status, log, tag_schema) VALUES (?, ?, ?, ?, ?)")?
+            .execute(
+                (
+                    &run.build_url,
+                    &run.display_name,
+                    run.status.map(|s| match s {
+                        BuildStatus::Aborted => "aborted",
+                        BuildStatus::Failure => "failure",
+                        BuildStatus::NotBuilt => "not_built",
+                        BuildStatus::Success => "success",
+                        BuildStatus::Unstable => "unstable",
+                    }),
+                    &run.log,
+                    run.tag_schema.map(u64::cast_signed),
+                ),
+            )?;
         Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
     }
 
@@ -153,10 +154,9 @@ impl Database {
                 .as_ptr()
                 .offset_from_unsigned(run.log.as_ref().unwrap().as_ptr());
             let end = start + issue.snippet.len();
-            self.conn.execute(
-                "INSERT INTO issues (snippet_start, snippet_end, run_id, tag_id) VALUES (?, ?, ?, ?)",
-                (start, end, run.id, issue.tag),
-            )?;
+            self.conn.prepare_cached(
+                "INSERT INTO issues (snippet_start, snippet_end, run_id, tag_id) VALUES (?, ?, ?, ?)")?
+                .execute((start, end, run.id, issue.tag))?;
         }
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
@@ -166,7 +166,7 @@ impl Database {
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
         tx.execute("DELETE FROM tags", ())?;
 
-        let mut stmt = tx.prepare_cached("INSERT INTO tags (name) VALUES (?)")?;
+        let mut stmt = tx.prepare("INSERT INTO tags (name) VALUES (?)")?;
         tags.try_swap_tags(|t| {
             stmt.execute((t.name,))?;
 
@@ -175,34 +175,35 @@ impl Database {
     }
 
     pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
-        self.conn.query_one(
-            "SELECT id, build_url, display_name, status, log, tag_schema FROM runs WHERE build_url = ?",
-            (build_url,),
-            |row| {
-                Ok(InDatabase::new(
-                    row.get(0)?,
-                    Run {
-                        build_url: row.get(1)?,
-                        display_name: row.get(2)?,
-                        status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
-                            "aborted" => BuildStatus::Aborted,
-                            "failure" => BuildStatus::Failure,
-                            "not_built" => BuildStatus::NotBuilt,
-                            "success" => BuildStatus::Success,
-                            "unstable" => BuildStatus::Unstable,
-                            _ => panic!("Failed to serialize run status!"),
-                        }),
-                        log: row.get(4)?,
-                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
-                    },
-                ))
-            },
-        )
+        self.conn.prepare_cached(
+            "SELECT id, build_url, display_name, status, log, tag_schema FROM runs WHERE build_url = ?")?
+            .query_one((build_url,), |row| {
+                    Ok(InDatabase::new(
+                        row.get(0)?,
+                        Run {
+                            build_url: row.get(1)?,
+                            display_name: row.get(2)?,
+                            status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
+                                "aborted" => BuildStatus::Aborted,
+                                "failure" => BuildStatus::Failure,
+                                "not_built" => BuildStatus::NotBuilt,
+                                "success" => BuildStatus::Success,
+                                "unstable" => BuildStatus::Unstable,
+                                _ => panic!("Failed to serialize run status!"),
+                            }),
+                            log: row.get(4)?,
+                            tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        },
+                    ))
+                },
+            )
     }
 
     pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
         self.conn
-            .prepare("SELECT id, build_url, display_name, status, log, tag_schema FROM runs")?
+            .prepare_cached(
+                "SELECT id, build_url, display_name, status, log, tag_schema FROM runs",
+            )?
             .query_map((), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
@@ -227,7 +228,7 @@ impl Database {
 
     pub fn get_issues<'a>(&self, run: &'a InDatabase<Run>) -> Result<Vec<InDatabase<Issue<'a>>>> {
         self.conn
-            .prepare("SELECT id, snippet_start, snippet_end, run_id, tag_id FROM issues WHERE run_id = ?")?
+            .prepare_cached("SELECT id, snippet_start, snippet_end, run_id, tag_id FROM issues WHERE run_id = ?")?
             .query_map((run.id,), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
@@ -246,9 +247,8 @@ impl Database {
 
     pub fn get_tag(&self, name: &str) -> Result<i64> {
         self.conn
-            .query_one("SELECT id, name FROM tags WHERE name = ?", (name,), |row| {
-                row.get(0)
-            })
+            .prepare_cached("SELECT id, name FROM tags WHERE name = ?")?
+            .query_one((name,), |row| row.get(0))
     }
 
     pub fn get_stats(&self) -> Result<Statistics> {
@@ -288,14 +288,17 @@ impl Database {
         )
     }
 
-    pub fn purge_invalid_issues_by_tag_schema(&self, current_schema: u64) -> Result<usize> {
-        self.conn.execute(
+    pub fn purge_invalid_issues_by_tag_schema(&mut self, current_schema: u64) -> Result<usize> {
+        let mut tx = self.conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
+
+        tx.execute(
             "DELETE FROM issues WHERE ROWID IN (SELECT i.ROWID FROM issues i INNER JOIN runs r ON i.run_id = r.id WHERE r.tag_schema != ?)",
             (current_schema.cast_signed(),),
         )?;
 
         // also set the run tag_schema to NULL to indicate an unparsed run
-        self.conn.execute(
+        tx.execute(
             "UPDATE runs SET tag_schema = NULL WHERE tag_schema != ?",
             (current_schema.cast_signed(),),
         )
