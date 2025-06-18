@@ -78,3 +78,25 @@ desc = "Generic MPI failure conditions"
 # <function name>(<number>)\.*: <stack traces>\n
 pattern = '''(?m)^Abort\([0-9]+\) on node [0-9]+: .*(\n[a-zA-Z_][a-zA-Z0-9_]+\([0-9]+\)\.*: .*)*$'''
 from = "Console"
+
+[[tag]]
+name = "python_traceback"
+desc = "Python Exception Traceback"
+
+# Matches messages of the following example
+# Traceback (most recent call last):
+#   File "/builder_task.py", line 279, in do_one_task
+#     raise RecoverableBuildException("test error")
+# common.exceptions.BuildException
+# https://stackoverflow.com/questions/53658695/how-to-match-the-whole-traceback-message-and-not-stop-early-using-regex
+pattern = '''(?m)^Traceback \(most recent call last\):(?:\n.*)+?\n(.*?(?:Exception|Error):)\s*(.+)$'''
+from = "Console"
+
+[[tag]]
+name = "ld_error"
+desc = "Program can't find shared library"
+
+# Matches messages of the following
+# <program name>: error while loading shared libraries: <libraries>
+pattern = '''(?m)^.+: error while loading shared libraries: .*$'''
+from = "Console"
