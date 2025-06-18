@@ -131,7 +131,7 @@ fn main() -> Result<()> {
 
     // open db
     info!("Opening database...");
-    let database = Database::open(&config.database)?;
+    let mut database = Database::open(&config.database)?;
 
     // check for cache purge
     if args.purge_cache {
@@ -141,7 +141,7 @@ fn main() -> Result<()> {
 
     // update TagSet
     info!("Updating tags...");
-    let tags = database.insert_tags(tags)?;
+    let tags = database.set_tags(tags)?;
 
     // purge outdated issues
     let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;

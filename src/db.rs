@@ -161,11 +161,12 @@ impl Database {
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
 
-    pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
-        let tx = self.conn.unchecked_transaction()?;
+    pub fn set_tags<'a>(&mut self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
+        let mut tx = self.conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
         tx.execute("DELETE FROM tags", ())?;
 
-        let mut stmt = tx.prepare_cached("INSERT OR IGNORE INTO tags (name) VALUES (?)")?;
+        let mut stmt = tx.prepare_cached("INSERT INTO tags (name) VALUES (?)")?;
         tags.try_swap_tags(|t| {
             stmt.execute((t.name,))?;
 
