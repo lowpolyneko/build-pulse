@@ -50,35 +50,44 @@ fn pull_build_logs(
                 |build| Some((job, build)),
             )
         })
-        .flat_map(|(job, build)| rayon::iter::repeat((job, build)).zip(&build.runs))
-        .filter(|((_, build), mb)| mb.number == build.number)
-        .try_for_each(|((job, build), mb)| {
-            let existing_run = db.lock().unwrap().get_run(&mb.url);
-            match existing_run {
-                // check if already processed first
-                Ok(_) => Ok(()), // cached
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    // retrieve the log
-                    let full_mb = mb.get_full_build(jenkins).map_err(Error::from_boxed)?;
-                    let run = full_mb.as_run(jenkins)?;
-                    let committed_run = db.lock().unwrap().insert_run(run)?;
-
-                    log!(
-                        match committed_run.status {
-                            Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
-                            _ => Level::Info,
-                        },
-                        "Job '{}{}' run '{}' finished with status {:?}.",
-                        job.name,
-                        build.display_name,
-                        committed_run.display_name,
-                        committed_run.status
-                    );
-
-                    Ok(())
-                }
-                Err(e) => Err(Error::from(e)),
-            }
+        .flat_map(|(job, build)| build.runs.par_iter().map(move |mb| (job, build, mb)))
+        .filter(|(_, build, mb)| mb.number == build.number)
+        .filter_map(
+            |(job, build, mb)| match db.lock().unwrap().get_run(&mb.url) {
+                Ok(_) => None,
+                Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((job, build, mb))),
+                Err(e) => Some(Err(Error::from(e))),
+            },
+        )
+        .map(|res| match res {
+            Ok((job, build, mb)) => Ok((
+                job,
+                build,
+                mb.get_full_build(jenkins).map_err(Error::from_boxed)?,
+            )),
+            Err(e) => Err(e),
+        })
+        .map(|res| match res {
+            Ok((job, build, full_mb)) => Ok((job, build, full_mb.as_run(jenkins)?)),
+            Err(e) => Err(e),
+        })
+        .map(|res| match res {
+            Ok((job, build, run)) => Ok((job, build, db.lock().unwrap().insert_run(run)?)),
+            Err(e) => Err(e),
+        })
+        .try_for_each(|res| match res {
+            Ok((job, build, committed_run)) => Ok(log!(
+                match committed_run.status {
+                    Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
+                    _ => Level::Info,
+                },
+                "Job '{}{}' run '{}' finished with status {:?}.",
+                job.name,
+                build.display_name,
+                committed_run.display_name,
+                committed_run.status
+            )),
+            Err(e) => Err(e),
         })
 }
 
@@ -86,27 +95,21 @@ fn parse_unprocessed_logs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
     let runs = db.lock().unwrap().get_all_runs()?;
 
     runs.par_iter()
-        .try_for_each(|run| match (run.tag_schema, &run.log) {
-            (None, Some(log)) => {
-                let count: u64 = tags // only process runs with no schema and a log
-                    .grep_tags(log)
-                    .flat_map(|t| t.grep_issue(&log))
-                    .try_fold(0, |acc, i| {
-                        db.lock().unwrap().insert_issue(&run, i)?;
-                        Ok::<_, Error>(acc + 1)
-                    })?;
+        .filter_map(|run| match (run.tag_schema, &run.log) {
+            (None, Some(log)) => Some((run, log)),
+            _ => None,
+        })
+        .flat_map_iter(|(run, log)| tags.grep_tags(log).map(move |t| (run, log, t)))
+        .flat_map_iter(|(run, log, t)| t.grep_issue(log).map(move |i| (run, t, i)))
+        .try_for_each(|(run, t, i)| {
+            db.lock().unwrap().insert_issue(&run, i)?;
 
-                log!(
-                    if count > 0 { Level::Warn } else { Level::Info },
-                    "Found {} issues for {:?} run '{}'",
-                    count,
-                    run.status,
-                    run.display_name
-                );
+            warn!(
+                "Found issue tagged '{}' in run '{}'",
+                t.name, run.display_name
+            );
 
-                Ok::<_, Error>(())
-            }
-            _ => Ok(()),
+            Ok::<_, Error>(())
         })?;
 
     // batch update tag schema for runs afterwards
