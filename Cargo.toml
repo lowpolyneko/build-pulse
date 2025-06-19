@@ -15,3 +15,7 @@ regex = "1.11.1"
 rusqlite = "0.36.0"
 serde = "1.0.219"
 toml = "0.8.23"
+
+[build-dependencies]
+openssl = { version = "0.10.73", features = ["vendored"] }
+rusqlite = { version = "0.36.0", features = ["bundled"] }
