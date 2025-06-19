@@ -9,13 +9,10 @@ clap = { version = "4.5.39", features = ["cargo", "derive"] }
 env_logger = "0.11.8"
 jenkins_api = { git = "https://github.com/lowpolyneko/jenkins-api.rs.git", branch = "feature/send-sync" }
 log = "0.4.27"
+openssl = { version = "0.10.73", features = ["vendored"] }
 maud = "0.27.0"
 rayon = "1.10.0"
 regex = "1.11.1"
-rusqlite = "0.36.0"
+rusqlite = { version = "0.36.0", features = ["bundled"] }
 serde = "1.0.219"
 toml = "0.8.23"
-
-[build-dependencies]
-openssl = { version = "0.10.73", features = ["vendored"] }
-rusqlite = { version = "0.36.0", features = ["bundled"] }
