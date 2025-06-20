@@ -1,7 +1,4 @@
-use std::{
-    hash::{self, Hash},
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 use jenkins_api::build::BuildStatus;
 use rusqlite::{Connection, Result};
@@ -37,15 +34,6 @@ pub struct Statistics {
 pub struct InDatabase<T> {
     pub id: i64,
     item: T,
-}
-
-impl<T> Hash for InDatabase<T>
-where
-    T: Hash,
-{
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.item.hash(state);
-    }
 }
 
 impl<T> InDatabase<T> {

@@ -19,8 +19,17 @@ pub struct ConfigTag {
     pub from: Field,
 }
 
-#[derive(Deserialize, Clone, Copy, Hash)]
-pub enum Field {
-    Console,
-    RunName,
+macro_rules! fields {
+    ($($member:tt),*) => {
+        #[derive(Deserialize, Clone, Copy, Eq, PartialEq, Hash)]
+        pub enum Field {$($member),*}
+
+        impl Field {
+            pub fn iter() -> impl Iterator<Item = Field> {
+                vec![$(Field::$member,)*].into_iter()
+            }
+        }
+    }
 }
+
+fields!(Console, RunName);

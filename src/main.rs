@@ -10,7 +10,7 @@ use time::UtcOffset;
 
 use crate::{
     api::{AsRun, SparseMatrixProject},
-    config::Config,
+    config::{Config, Field},
     db::{Database, InDatabase},
     parse::{Tag, TagSet},
 };
@@ -92,16 +92,20 @@ fn pull_build_logs(
         })
 }
 
-fn parse_unprocessed_logs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
+fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
     let runs = db.lock().unwrap().get_all_runs()?;
 
     runs.par_iter()
-        .filter_map(|run| match (run.tag_schema, &run.log) {
-            (None, Some(log)) => Some((run, log)),
+        .flat_map_iter(|run| Field::iter().map(move |f| (run, f)))
+        .filter_map(|(run, field)| match (run.tag_schema, &run.log, field) {
+            (None, Some(log), Field::Console) => Some((run, field, log)),
+            (None, Some(_), Field::RunName) => Some((run, field, &run.display_name)),
             _ => None,
         })
-        .flat_map_iter(|(run, log)| tags.grep_tags(log).map(move |t| (run, log, t)))
-        .flat_map_iter(|(run, log, t)| t.grep_issue(log).map(move |i| (run, t, i)))
+        .flat_map_iter(|(run, field, data)| {
+            tags.grep_tags(data, field).map(move |t| (run, data, t))
+        })
+        .flat_map_iter(|(run, data, t)| t.grep_issue(data).map(move |i| (run, t, i)))
         .try_for_each(|(run, t, i)| {
             db.lock().unwrap().insert_issue(&run, i)?;
 
@@ -181,7 +185,7 @@ fn main() -> Result<()> {
     info!("----------------------------------------");
     info!("Parsing unprocessed run logs...");
 
-    parse_unprocessed_logs(&tags, &database)?;
+    parse_unprocessed_runs(&tags, &database)?;
 
     info!("Done!");
     info!("----------------------------------------");

@@ -21,12 +21,12 @@ pub struct Tag<'a> {
     from: Field,
 }
 
-impl<T> Hash for TagSet<T>
+impl<'a, T> Hash for TagSet<T>
 where
-    T: Hash,
+    T: Deref<Target = Tag<'a>>,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.tags.hash(state);
+        self.tags.iter().for_each(|t| t.hash(state));
     }
 }
 
@@ -38,7 +38,10 @@ impl Hash for Tag<'_> {
     }
 }
 
-impl<T> Deref for TagSet<T> {
+impl<'a, T> Deref for TagSet<T>
+where
+    T: Deref<Target = Tag<'a>>,
+{
     type Target = Vec<T>;
     fn deref(&self) -> &Self::Target {
         &self.tags
@@ -63,6 +66,26 @@ impl<'a> TagSet<Tag<'a>> {
     }
 }
 
+impl<'a, T> TagSet<T>
+where
+    T: Deref<Target = Tag<'a>>,
+{
+    pub fn grep_tags(&self, field: &str, from: Field) -> impl Iterator<Item = &T> {
+        // matches using the match set first, then the regex of all valid matches are ran again to find them
+        self.match_set
+            .matches(field)
+            .into_iter()
+            .map(|i| &self.tags[i])
+            .filter(move |t| t.from == from)
+    }
+
+    pub fn schema(&self) -> u64 {
+        let mut s = DefaultHasher::new();
+        self.hash(&mut s);
+        s.finish()
+    }
+}
+
 impl<T> TagSet<T> {
     pub fn try_swap_tags<F, U, E>(self, f: F) -> Result<TagSet<U>, E>
     where
@@ -77,30 +100,11 @@ impl<T> TagSet<T> {
             match_set: self.match_set,
         })
     }
-
-    pub fn grep_tags(&self, log: &str) -> impl Iterator<Item = &T> {
-        // matches using the match set first, then the regex of all valid matches are ran again to find them
-        self.match_set
-            .matches(log)
-            .into_iter()
-            .map(|i| &self.tags[i])
-    }
-}
-
-impl<T> TagSet<T>
-where
-    T: Hash,
-{
-    pub fn schema(&self) -> u64 {
-        let mut s = DefaultHasher::new();
-        self.hash(&mut s);
-        s.finish()
-    }
 }
 
 impl<'a> InDatabase<Tag<'a>> {
-    pub fn grep_issue(&'a self, log: &'a str) -> impl Iterator<Item = Issue<'a>> {
-        self.regex.find_iter(log).map(|m| Issue {
+    pub fn grep_issue(&'a self, field: &'a str) -> impl Iterator<Item = Issue<'a>> {
+        self.regex.find_iter(field).map(|m| Issue {
             snippet: m.as_str(),
             tag: self.id,
         })
