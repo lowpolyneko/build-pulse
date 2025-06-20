@@ -1,12 +1,26 @@
+use std::time::SystemTime;
+
 use jenkins_api::{build::BuildStatus, job::Job};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
+use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
     api::{SparseJob, SparseMatrixProject},
     db::{Database, InDatabase, Run},
 };
 
-fn render_job(job: &SparseJob, db: &Database) -> Markup {
+fn format_timestamp<T>(time: T) -> String
+where
+    T: Into<OffsetDateTime>,
+{
+    time.into()
+        .format(
+            format_description!("[month repr:short] [day], [year] [hour repr:12]:[minute]:[second] [period] UTC[offset_hour padding:none sign:mandatory]")
+        )
+        .unwrap()
+}
+
+fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
     let sorted_runs = job.last_build.as_ref().map(|j| {
         let mut runs = j
             .runs
@@ -37,9 +51,9 @@ fn render_job(job: &SparseJob, db: &Database) -> Markup {
                 a href=(build.url) {
                     (build.display_name)
                 }
-                " at "
+                " on "
                 i {
-                    (build.timestamp)
+                    (format_timestamp(OffsetDateTime::from_unix_timestamp((build.timestamp/1000).cast_signed()).expect("Jenkins returned an invalid timestamp!").to_offset(tz)))
                 }
                 " was "
                 b {
@@ -111,7 +125,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
     }
 }
 
-pub fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
+fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
     let stats = db
         .get_stats()
         .expect("Failed to get statistics from database.");
@@ -176,7 +190,8 @@ pub fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
     }
 }
 
-pub fn render(project: &SparseMatrixProject, db: &Database) -> Markup {
+pub fn render(project: &SparseMatrixProject, db: &Database, tz: UtcOffset) -> Markup {
+    let time: OffsetDateTime = SystemTime::now().into();
     html! {
         (DOCTYPE)
         html {
@@ -189,7 +204,13 @@ pub fn render(project: &SparseMatrixProject, db: &Database) -> Markup {
                 }
                 (render_stats(project, db))
                 @for job in &project.jobs {
-                    (render_job(job, db))
+                    (render_job(job, db, tz))
+                }
+                p {
+                    "Report generated on "
+                    code {
+                        (format_timestamp(time.to_offset(tz)))
+                    }
                 }
             }
         }

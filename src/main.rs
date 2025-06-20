@@ -6,6 +6,7 @@ use env_logger::Env;
 use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
 use log::{Level, info, log, warn};
 use rayon::prelude::*;
+use time::UtcOffset;
 
 use crate::{
     api::{AsRun, SparseMatrixProject},
@@ -190,7 +191,12 @@ fn main() -> Result<()> {
     if let Some(output) = args.output {
         info!("Generating report...");
 
-        let markup = page::render(&project, &database).into_string();
+        let markup = page::render(
+            &project,
+            &database,
+            UtcOffset::from_hms(config.timezone, 0, 0)?,
+        )
+        .into_string();
 
         if let Some(filepath) = output {
             fs::write(&filepath, markup)?;

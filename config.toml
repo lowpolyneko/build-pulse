@@ -1,6 +1,8 @@
 jenkins_url = "https://jenkins-pmrs.cels.anl.gov"
 project = "mpich-main-nightly"
 
+timezone = -5 # in UTC-<hour> format
+
 # username = <OPTIONAL: your user>
 # password = <OPTIONAL: your password>
 

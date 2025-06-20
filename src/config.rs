@@ -7,6 +7,7 @@ pub struct Config {
     pub username: Option<String>,
     pub password: Option<String>,
     pub database: String,
+    pub timezone: i8,
     pub tag: Vec<ConfigTag>,
 }
 
@@ -21,4 +22,5 @@ pub struct ConfigTag {
 #[derive(Deserialize, Clone, Copy, Hash)]
 pub enum Field {
     Console,
+    RunName,
 }
