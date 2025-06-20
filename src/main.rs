@@ -77,17 +77,21 @@ fn pull_build_logs(
             Err(e) => Err(e),
         })
         .try_for_each(|res| match res {
-            Ok((job, build, committed_run)) => Ok(log!(
-                match committed_run.status {
-                    Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
-                    _ => Level::Info,
-                },
-                "Job '{}{}' run '{}' finished with status {:?}.",
-                job.name,
-                build.display_name,
-                committed_run.display_name,
-                committed_run.status
-            )),
+            Ok((job, build, committed_run)) => {
+                log!(
+                    match committed_run.status {
+                        Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
+                        _ => Level::Info,
+                    },
+                    "Job '{}{}' run '{}' finished with status {:?}.",
+                    job.name,
+                    build.display_name,
+                    committed_run.display_name,
+                    committed_run.status
+                );
+
+                Ok(())
+            }
             Err(e) => Err(e),
         })
 }
@@ -107,7 +111,7 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         })
         .flat_map_iter(|(run, data, t)| t.grep_issue(data).map(move |i| (run, t, i)))
         .try_for_each(|(run, t, i)| {
-            db.lock().unwrap().insert_issue(&run, i)?;
+            db.lock().unwrap().insert_issue(run, i)?;
 
             warn!(
                 "Found issue tagged '{}' in run '{}'",
@@ -154,10 +158,7 @@ fn main() -> Result<()> {
     // purge outdated issues
     let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;
     if outdated > 0 {
-        warn!(
-            "Purged {} issues that parsed with an outdated tag schema!",
-            outdated
-        );
+        warn!("Purged {outdated} issues that parsed with an outdated tag schema!");
     }
 
     info!(

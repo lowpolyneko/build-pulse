@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use jenkins_api::build::BuildStatus;
 use rusqlite::{Connection, Error, Result};
-use serde_json::{Value, from_value, to_value};
+use serde_json::{from_value, to_value};
 
 use crate::parse::{Tag, TagSet};
 
@@ -23,6 +23,7 @@ pub struct Issue<'a> {
     pub tag: i64,
 }
 
+#[derive(Default)]
 pub struct Statistics {
     pub successful: u64,
     pub unstable: u64,
@@ -54,19 +55,6 @@ impl<T> Deref for InDatabase<T> {
 impl<T> DerefMut for InDatabase<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.item
-    }
-}
-
-impl Default for Statistics {
-    fn default() -> Self {
-        Statistics {
-            successful: 0,
-            unstable: 0,
-            failures: 0,
-            aborted: 0,
-            not_built: 0,
-            issues_found: 0,
-        }
     }
 }
 
@@ -267,7 +255,7 @@ impl Database {
         stats.issues_found = self
             .conn
             .prepare("SELECT COUNT(*) FROM issues")?
-            .query_one((), |row| Ok(row.get(0)?))?;
+            .query_one((), |row| row.get(0))?;
 
         Ok(stats)
     }
