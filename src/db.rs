@@ -164,9 +164,9 @@ impl Database {
     pub fn set_tags<'a>(&mut self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
         let mut tx = self.conn.transaction()?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
-        tx.execute("DELETE FROM tags", ())?;
+        tx.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT NULL FROM issues WHERE issues.tag_id = tags.id)", ())?;
 
-        let mut stmt = tx.prepare("INSERT INTO tags (name) VALUES (?)")?;
+        let mut stmt = tx.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)")?;
         tags.try_swap_tags(|t| {
             stmt.execute((t.name,))?;
 
