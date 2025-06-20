@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -21,7 +21,7 @@ pub struct ConfigTag {
 
 macro_rules! fields {
     ($($member:tt),*) => {
-        #[derive(Deserialize, Clone, Copy, Eq, PartialEq, Hash)]
+        #[derive(Deserialize, Serialize, Clone, Copy, Eq, PartialEq, Hash)]
         pub enum Field {$($member),*}
 
         impl Field {

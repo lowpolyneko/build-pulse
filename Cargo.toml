@@ -13,7 +13,8 @@ openssl = { version = "0.10.73", features = ["vendored"] }
 maud = "0.27.0"
 rayon = "1.10.0"
 regex = "1.11.1"
-rusqlite = { version = "0.36.0", features = ["bundled"] }
+rusqlite = { version = "0.36.0", features = ["bundled", "serde_json"] }
 serde = "1.0.219"
 toml = "0.8.23"
 time = { version = "0.3.41", features = ["formatting", "macros"] }
+serde_json = "1.0.140"

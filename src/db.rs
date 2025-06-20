@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Error, Result};
+use serde_json::{Value, from_value, to_value};
 
 use crate::parse::{Tag, TagSet};
 
@@ -100,6 +101,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS tags (
                 id              INTEGER PRIMARY KEY,
                 name            TEXT NOT NULL,
+                field           TEXT NOT NULL,
                 UNIQUE(name)
             ) STRICT;
             COMMIT;
@@ -116,13 +118,7 @@ impl Database {
                 (
                     &run.build_url,
                     &run.display_name,
-                    run.status.map(|s| match s {
-                        BuildStatus::Aborted => "aborted",
-                        BuildStatus::Failure => "failure",
-                        BuildStatus::NotBuilt => "not_built",
-                        BuildStatus::Success => "success",
-                        BuildStatus::Unstable => "unstable",
-                    }),
+                    to_value(run.status).map_err(|e| Error::ToSqlConversionFailure(e.into()))?,
                     &run.log,
                     run.tag_schema.map(u64::cast_signed),
                 ),
@@ -154,9 +150,12 @@ impl Database {
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
         tx.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT NULL FROM issues WHERE issues.tag_id = tags.id)", ())?;
 
-        let mut stmt = tx.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)")?;
+        let mut stmt = tx.prepare("INSERT OR IGNORE INTO tags (name, field) VALUES (?, ?)")?;
         tags.try_swap_tags(|t| {
-            stmt.execute((t.name,))?;
+            stmt.execute((
+                t.name,
+                to_value(t.from).map_err(|e| Error::ToSqlConversionFailure(e.into()))?,
+            ))?;
 
             Ok(InDatabase::new(tx.last_insert_rowid(), t))
         })
@@ -171,14 +170,13 @@ impl Database {
                         Run {
                             build_url: row.get(1)?,
                             display_name: row.get(2)?,
-                            status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
-                                "aborted" => BuildStatus::Aborted,
-                                "failure" => BuildStatus::Failure,
-                                "not_built" => BuildStatus::NotBuilt,
-                                "success" => BuildStatus::Success,
-                                "unstable" => BuildStatus::Unstable,
-                                _ => panic!("Failed to serialize run status!"),
-                            }),
+                            status: from_value(row.get(3)?).map_err(|e| {
+                                Error::FromSqlConversionFailure(
+                                    3,
+                                    rusqlite::types::Type::Text,
+                                    e.into(),
+                                )
+                            })?,
                             log: row.get(4)?,
                             tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
                         },
@@ -198,14 +196,13 @@ impl Database {
                     Run {
                         build_url: row.get(1)?,
                         display_name: row.get(2)?,
-                        status: row.get::<_, Option<String>>(3)?.map(|s| match s.as_str() {
-                            "aborted" => BuildStatus::Aborted,
-                            "failure" => BuildStatus::Failure,
-                            "not_built" => BuildStatus::NotBuilt,
-                            "success" => BuildStatus::Success,
-                            "unstable" => BuildStatus::Unstable,
-                            _ => panic!("Failed to serialize run status!"),
-                        }),
+                        status: from_value(row.get(3)?).map_err(|e| {
+                            Error::FromSqlConversionFailure(
+                                3,
+                                rusqlite::types::Type::Text,
+                                e.into(),
+                            )
+                        })?,
                         log: row.get(4)?,
                         tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
                     },
@@ -245,19 +242,24 @@ impl Database {
             .conn
             .prepare("SELECT status,COUNT(*) FROM runs GROUP BY status")?
             .query_map((), |row| {
-                Ok((row.get::<_, Option<String>>(0)?, row.get::<_, u64>(1)?))
+                Ok((
+                    from_value::<Option<BuildStatus>>(row.get(0)?).map_err(|e| {
+                        Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
+                    })?,
+                    row.get::<_, u64>(1)?,
+                ))
             })?
             .collect::<Result<Vec<_>>>()?
             .iter()
             .fold(Statistics::default(), |mut stats, (status, count)| {
-                status.as_ref().map(|s| match s.as_str() {
-                    "aborted" => stats.aborted += count,
-                    "failure" => stats.failures += count,
-                    "not_built" => stats.not_built += count,
-                    "success" => stats.successful += count,
-                    "unstable" => stats.unstable += count,
-                    _ => panic!("Failed to serialize run status!"),
-                });
+                match status {
+                    Some(BuildStatus::Aborted) => stats.aborted += count,
+                    Some(BuildStatus::Failure) => stats.failures += count,
+                    Some(BuildStatus::NotBuilt) => stats.not_built += count,
+                    Some(BuildStatus::Success) => stats.successful += count,
+                    Some(BuildStatus::Unstable) => stats.unstable += count,
+                    _ => {}
+                };
 
                 stats
             });

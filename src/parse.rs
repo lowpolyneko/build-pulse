@@ -18,7 +18,7 @@ pub struct TagSet<T> {
 pub struct Tag<'a> {
     pub name: &'a str,
     regex: Regex,
-    from: Field,
+    pub from: &'a Field,
 }
 
 impl<'a, T> Hash for TagSet<T>
@@ -56,7 +56,7 @@ impl<'a> TagSet<Tag<'a>> {
                 Ok(Tag {
                     name: &i.name,
                     regex: Regex::new(&i.pattern)?,
-                    from: i.from,
+                    from: &i.from,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -76,7 +76,7 @@ where
             .matches(field)
             .into_iter()
             .map(|i| &self.tags[i])
-            .filter(move |t| t.from == from)
+            .filter(move |t| *t.from == from)
     }
 
     pub fn schema(&self) -> u64 {
