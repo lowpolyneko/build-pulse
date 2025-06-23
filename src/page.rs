@@ -112,7 +112,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 @if let Ok(issues) = db.get_issues(run) {
                     @if !issues.is_empty() {
                         b {
-                            "Identified Issues: "
+                            "Identified Tags: "
                         }
                         @if let Ok(tags) = db.get_tags(run) {
                             @for (name, desc) in tags {

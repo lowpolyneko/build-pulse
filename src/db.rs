@@ -158,9 +158,9 @@ impl Database {
 
     pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
         // TODO: Prune old tags
-        let mut stmt = self.conn.prepare(
-            "INSERT OR REPLACE INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?)",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET desc = excluded.desc, field = excluded.field, severity = excluded.severity")?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,

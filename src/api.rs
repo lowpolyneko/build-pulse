@@ -80,7 +80,7 @@ where
             display_name: self.full_display_name_or_default().to_string(),
             status,
             log: match status {
-                Some(BuildStatus::Failure) => Some(
+                Some(BuildStatus::Failure | BuildStatus::Unstable) => Some(
                     // only get log on failure
                     self.get_console(jenkins_client)
                         .map_err(Error::from_boxed)?,
