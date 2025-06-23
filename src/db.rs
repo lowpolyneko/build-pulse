@@ -140,9 +140,8 @@ impl Database {
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
 
-    pub fn set_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
-        self.conn.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT NULL FROM issues WHERE issues.tag_id = tags.id)", ())?;
-
+    pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
+        // TODO: Prune old tags
         let mut stmt = self
             .conn
             .prepare("INSERT INTO tags (name, desc, field) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET desc = excluded.desc, field = excluded.field")?;

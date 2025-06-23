@@ -153,7 +153,7 @@ fn main() -> Result<()> {
 
     // update TagSet
     info!("Updating tags...");
-    let tags = database.set_tags(tags)?;
+    let tags = database.insert_tags(tags)?;
 
     // purge outdated issues
     let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;
