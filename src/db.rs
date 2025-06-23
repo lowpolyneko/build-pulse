@@ -133,19 +133,19 @@ impl Database {
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
 
-    pub fn set_tags<'a>(&mut self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
-        let mut tx = self.conn.transaction()?;
-        tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
-        tx.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT NULL FROM issues WHERE issues.tag_id = tags.id)", ())?;
+    pub fn set_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
+        self.conn.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT NULL FROM issues WHERE issues.tag_id = tags.id)", ())?;
 
-        let mut stmt = tx.prepare("INSERT OR IGNORE INTO tags (name, field) VALUES (?, ?)")?;
+        let mut stmt = self
+            .conn
+            .prepare("INSERT OR IGNORE INTO tags (name, field) VALUES (?, ?)")?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,
                 to_value(t.from).map_err(|e| Error::ToSqlConversionFailure(e.into()))?,
             ))?;
 
-            Ok(InDatabase::new(tx.last_insert_rowid(), t))
+            Ok(InDatabase::new(self.conn.last_insert_rowid(), t))
         })
     }
 
