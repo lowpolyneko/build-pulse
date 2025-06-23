@@ -145,7 +145,7 @@ impl Database {
 
         let mut stmt = self
             .conn
-            .prepare("INSERT OR IGNORE INTO tags (name, desc, field) VALUES (?, ?, ?)")?;
+            .prepare("INSERT INTO tags (name, desc, field) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET desc = excluded.desc, field = excluded.field")?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,
