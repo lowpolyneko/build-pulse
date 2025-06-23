@@ -66,7 +66,7 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
                     }
                 }
             }
-            details open="true" {
+            details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable))] {
                 table style="border: 1px solid black;" {
                     @if let Some(runs) = sorted_runs {
                         @for run in runs {
@@ -167,39 +167,101 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
             (total)
             " jobs successful."
         }
-        p {
-            "Failures: "
-            (stats.failures)
-            " runs"
+
+        h4 {
+            "Run Status"
         }
-        p {
-            "Unstable: "
-            (stats.unstable)
-            " runs"
+        table style="border: 1px solid black;" {
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    "Failures"
+                }
+                td style="border: 1px solid black;" {
+                    (stats.failures)
+                    " runs"
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    "Unstable"
+                }
+                td style="border: 1px solid black;" {
+                    (stats.unstable)
+                    " runs"
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    "Healthy"
+                }
+                td style="border: 1px solid black;" {
+                    (stats.successful)
+                    " runs"
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    "Aborted"
+                }
+                td style="border: 1px solid black;" {
+                    (stats.aborted)
+                    " runs"
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    "Not Built"
+                }
+                td style="border: 1px solid black;" {
+                    (stats.not_built)
+                    " runs"
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    b {
+                        "Total"
+                    }
+                }
+                td style="border: 1px solid black;" {
+                    b {
+                        (stats.successful + stats.failures + stats.unstable + stats.aborted + stats.not_built)
+                        " runs"
+                    }
+                }
+            }
         }
-        p {
-            "Healthy: "
-            (stats.successful)
-            " runs"
+
+        h4 {
+            "By Tag"
         }
-        p {
-            "Aborted: "
-            (stats.aborted)
-            " runs"
-        }
-        p {
-            "Not Built: "
-            (stats.not_built)
-            " runs"
-        }
-        p {
-            "Total: "
-            (stats.successful + stats.failures + stats.unstable + stats.aborted + stats.not_built)
-            " runs"
-        }
-        b {
-            (stats.issues_found)
-            " issues found!"
+        table style="border: 1px solid black;" {
+            @for (name, desc, count) in stats.tag_counts {
+                tr style="border: 1px solid black;" {
+                    td style="border: 1px solid black;" {
+                        code title=(desc) {
+                            (name)
+                        }
+                    }
+                    td style="border: 1px solid black;" {
+                        (count)
+                        " issues"
+                    }
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    b {
+                        "Total"
+                    }
+                }
+                td style="border: 1px solid black;" {
+                    b {
+                        (stats.issues_found)
+                        " issues found!"
+                    }
+                }
+            }
         }
     }
 }

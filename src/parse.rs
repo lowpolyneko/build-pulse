@@ -6,7 +6,7 @@ use std::{
 use regex::{Regex, RegexSet};
 
 use crate::{
-    config::{ConfigTag, Field},
+    config::{ConfigTag, Field, Severity},
     db::{InDatabase, Issue},
 };
 
@@ -20,6 +20,7 @@ pub struct Tag<'a> {
     pub desc: &'a str,
     regex: Regex,
     pub from: &'a Field,
+    pub severity: &'a Severity,
 }
 
 impl<'a, T> Hash for TagSet<T>
@@ -59,6 +60,7 @@ impl<'a> TagSet<Tag<'a>> {
                     desc: &i.desc,
                     regex: Regex::new(&i.pattern)?,
                     from: &i.from,
+                    severity: &i.severity,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

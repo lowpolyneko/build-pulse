@@ -17,19 +17,21 @@ pub struct ConfigTag {
     pub desc: String,
     pub pattern: String,
     pub from: Field,
+    pub severity: Severity,
 }
 
 macro_rules! fields {
-    ($($member:tt),*) => {
+    ($name:ident, $($member:tt),*) => {
         #[derive(Deserialize, Serialize, Clone, Copy, Eq, PartialEq, Hash)]
-        pub enum Field {$($member),*}
+        pub enum $name {$($member),*}
 
-        impl Field {
-            pub fn iter() -> impl Iterator<Item = Field> {
-                vec![$(Field::$member,)*].into_iter()
+        impl $name {
+            pub fn iter() -> impl Iterator<Item = $name> {
+                vec![$($name::$member,)*].into_iter()
             }
         }
     }
 }
 
-fields!(Console, RunName);
+fields!(Field, Console, RunName);
+fields!(Severity, Metadata, Info, Warning, Error);

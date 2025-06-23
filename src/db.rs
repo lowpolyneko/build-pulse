@@ -9,6 +9,20 @@ use crate::{
     parse::{Tag, TagSet},
 };
 
+macro_rules! read_value {
+    ($row:ident, $idx:literal) => {
+        from_value($row.get($idx)?).map_err(|e| {
+            Error::FromSqlConversionFailure($idx, rusqlite::types::Type::Text, e.into())
+        })?
+    };
+}
+
+macro_rules! write_value {
+    ($val:expr) => {
+        to_value($val).map_err(|e| Error::ToSqlConversionFailure(e.into()))?
+    };
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -34,6 +48,7 @@ pub struct Statistics {
     pub aborted: u64,
     pub not_built: u64,
     pub issues_found: u64,
+    pub tag_counts: Vec<(String, String, u64)>,
 }
 
 pub struct InDatabase<T> {
@@ -94,6 +109,7 @@ impl Database {
                 name            TEXT NOT NULL,
                 desc            TEXT NOT NULL,
                 field           TEXT NOT NULL,
+                severity        TEXT NOT NULL,
                 UNIQUE(name)
             ) STRICT;
             COMMIT;
@@ -110,7 +126,7 @@ impl Database {
                 (
                     &run.build_url,
                     &run.display_name,
-                    to_value(run.status).map_err(|e| Error::ToSqlConversionFailure(e.into()))?,
+                    write_value!(run.status),
                     &run.log,
                     run.tag_schema.map(u64::cast_signed),
                 ),
@@ -142,14 +158,15 @@ impl Database {
 
     pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
         // TODO: Prune old tags
-        let mut stmt = self
-            .conn
-            .prepare("INSERT INTO tags (name, desc, field) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET desc = excluded.desc, field = excluded.field")?;
+        let mut stmt = self.conn.prepare(
+            "INSERT OR REPLACE INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?)",
+        )?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,
                 t.desc,
-                to_value(t.from).map_err(|e| Error::ToSqlConversionFailure(e.into()))?,
+                write_value!(t.from),
+                write_value!(t.severity),
             ))?;
 
             Ok(InDatabase::new(self.conn.last_insert_rowid(), t))
@@ -165,13 +182,7 @@ impl Database {
                         Run {
                             build_url: row.get(1)?,
                             display_name: row.get(2)?,
-                            status: from_value(row.get(3)?).map_err(|e| {
-                                Error::FromSqlConversionFailure(
-                                    3,
-                                    rusqlite::types::Type::Text,
-                                    e.into(),
-                                )
-                            })?,
+                            status: read_value!(row, 3),
                             log: row.get(4)?,
                             tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
                         },
@@ -191,13 +202,7 @@ impl Database {
                     Run {
                         build_url: row.get(1)?,
                         display_name: row.get(2)?,
-                        status: from_value(row.get(3)?).map_err(|e| {
-                            Error::FromSqlConversionFailure(
-                                3,
-                                rusqlite::types::Type::Text,
-                                e.into(),
-                            )
-                        })?,
+                        status: read_value!(row, 3),
                         log: row.get(4)?,
                         tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
                     },
@@ -213,13 +218,7 @@ impl Database {
                 Ok(InDatabase::new(
                     row.get(0)?,
                     Issue {
-                        snippet: &match from_value(row.get(5)?).map_err(|e| {
-                                Error::FromSqlConversionFailure(
-                                    5,
-                                    rusqlite::types::Type::Text,
-                                    e.into(),
-                                )
-                            })? {
+                        snippet: &match read_value!(row, 5) {
                                 Field::Console => run
                                                     .log
                                                     .as_ref()
@@ -285,6 +284,12 @@ impl Database {
             .conn
             .prepare("SELECT COUNT(*) FROM issues")?
             .query_one((), |row| row.get(0))?;
+
+        stats.tag_counts = self
+            .conn
+            .prepare("SELECT name, desc, COUNT(*) FROM issues JOIN tags ON tags.id = issues.tag_id GROUP BY issues.tag_id")?
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(stats)
     }
