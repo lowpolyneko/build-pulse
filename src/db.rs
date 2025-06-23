@@ -4,7 +4,10 @@ use jenkins_api::build::BuildStatus;
 use rusqlite::{Connection, Error, Result};
 use serde_json::{from_value, to_value};
 
-use crate::parse::{Tag, TagSet};
+use crate::{
+    config::Field,
+    parse::{Tag, TagSet},
+};
 
 pub struct Database {
     conn: Connection,
@@ -122,10 +125,13 @@ impl Database {
     ) -> Result<InDatabase<Issue<'a>>> {
         unsafe {
             // SAFETY: `Run` owns all underlying `Issue`s
-            let start = issue
-                .snippet
-                .as_ptr()
-                .offset_from_unsigned(run.log.as_ref().unwrap().as_ptr());
+            let start = issue.snippet.as_ptr().offset_from_unsigned(
+                match self.get_tag_field(issue.tag)? {
+                    Field::Console => run.log.as_ref().unwrap(),
+                    Field::RunName => &run.display_name,
+                }
+                .as_ptr(),
+            );
             let end = start + issue.snippet.len();
             self.conn.prepare_cached(
                 "INSERT INTO issues (snippet_start, snippet_end, run_id, tag_id) VALUES (?, ?, ?, ?)")?
@@ -203,15 +209,24 @@ impl Database {
 
     pub fn get_issues<'a>(&self, run: &'a InDatabase<Run>) -> Result<Vec<InDatabase<Issue<'a>>>> {
         self.conn
-            .prepare_cached("SELECT id, snippet_start, snippet_end, run_id, tag_id FROM issues WHERE run_id = ?")?
+            .prepare_cached("SELECT issues.id, snippet_start, snippet_end, run_id, tag_id, field FROM issues JOIN tags ON tags.id = issues.tag_id WHERE issues.run_id = ?")?
             .query_map((run.id,), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
                     Issue {
-                        snippet: &run
-                            .log
-                            .as_ref()
-                            .expect("Issue references non-existant log!")
+                        snippet: &match from_value(row.get(5)?).map_err(|e| {
+                                Error::FromSqlConversionFailure(
+                                    5,
+                                    rusqlite::types::Type::Text,
+                                    e.into(),
+                                )
+                            })? {
+                                Field::Console => run
+                                                    .log
+                                                    .as_ref()
+                                                    .expect("Issue references non-existant log!"),
+                                Field::RunName => &run.display_name,
+                            }
                             [row.get(1)?..row.get(2)?],
                         tag: row.get(4)?,
                     }
@@ -227,6 +242,16 @@ impl Database {
             )?
             .query_map((run.id,), |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect()
+    }
+
+    pub fn get_tag_field(&self, id: i64) -> Result<Field> {
+        self.conn
+            .prepare_cached("SELECT field FROM tags WHERE tags.id = ?")?
+            .query_one((id,), |row| {
+                from_value(row.get(0)?).map_err(|e| {
+                    Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
+                })
+            })
     }
 
     pub fn get_stats(&self) -> Result<Statistics> {

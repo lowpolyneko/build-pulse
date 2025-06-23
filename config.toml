@@ -102,3 +102,10 @@ desc = "Program can't find shared library"
 # <program name>: error while loading shared libraries: <libraries>
 pattern = '''(?m)^.+: error while loading shared libraries: .*$'''
 from = "Console"
+
+[[tag]]
+name = "bsd"
+desc = "FreeBSD Build"
+
+pattern = '''freebsd64'''
+from = "RunName"
