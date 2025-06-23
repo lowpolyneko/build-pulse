@@ -89,6 +89,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS tags (
                 id              INTEGER PRIMARY KEY,
                 name            TEXT NOT NULL,
+                desc            TEXT NOT NULL,
                 field           TEXT NOT NULL,
                 UNIQUE(name)
             ) STRICT;
@@ -138,10 +139,11 @@ impl Database {
 
         let mut stmt = self
             .conn
-            .prepare("INSERT OR IGNORE INTO tags (name, field) VALUES (?, ?)")?;
+            .prepare("INSERT OR IGNORE INTO tags (name, desc, field) VALUES (?, ?, ?)")?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,
+                t.desc,
                 to_value(t.from).map_err(|e| Error::ToSqlConversionFailure(e.into()))?,
             ))?;
 
@@ -218,10 +220,13 @@ impl Database {
             .collect()
     }
 
-    pub fn get_tag(&self, name: &str) -> Result<i64> {
+    pub fn get_tags(&self, run: &InDatabase<Run>) -> Result<Vec<(String, String)>> {
         self.conn
-            .prepare_cached("SELECT id, name FROM tags WHERE name = ?")?
-            .query_one((name,), |row| row.get(0))
+            .prepare_cached(
+                "SELECT DISTINCT name, desc FROM tags JOIN issues ON issues.tag_id = tags.id WHERE issues.run_id = ?",
+            )?
+            .query_map((run.id,), |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
     }
 
     pub fn get_stats(&self) -> Result<Statistics> {

@@ -84,8 +84,14 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
 }
 
 fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
+    let row_border = match run.status {
+        Some(BuildStatus::Failure | BuildStatus::Unstable) => {
+            "border: 1px solid black; background-color: lightgray"
+        }
+        _ => "border: 1px solid black;",
+    };
     html! {
-        tr style="border: 1px solid black;" {
+        tr style=(row_border) {
             td style="border: 1px solid black;" { // status
                 b {
                     @match run.status {
@@ -106,7 +112,15 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 @if let Ok(issues) = db.get_issues(run) {
                     @if !issues.is_empty() {
                         b {
-                            "Identified Issues"
+                            "Identified Issues: "
+                        }
+                        @if let Ok(tags) = db.get_tags(run) {
+                            @for (name, desc) in tags {
+                                code title=(desc) {
+                                    (name)
+                                    ", "
+                                }
+                            }
                         }
                         hr;
                         @for i in issues {

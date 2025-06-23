@@ -17,6 +17,7 @@ pub struct TagSet<T> {
 
 pub struct Tag<'a> {
     pub name: &'a str,
+    pub desc: &'a str,
     regex: Regex,
     pub from: &'a Field,
 }
@@ -55,6 +56,7 @@ impl<'a> TagSet<Tag<'a>> {
             .map(|i| {
                 Ok(Tag {
                     name: &i.name,
+                    desc: &i.desc,
                     regex: Regex::new(&i.pattern)?,
                     from: &i.from,
                 })
