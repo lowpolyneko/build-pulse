@@ -109,7 +109,7 @@ impl Database {
                 name            TEXT NOT NULL,
                 desc            TEXT NOT NULL,
                 field           TEXT NOT NULL,
-                severity        TEXT NOT NULL,
+                severity        TEXT NOT NULL
             ) STRICT;
             COMMIT;
             ",
@@ -244,7 +244,7 @@ impl Database {
     pub fn get_tag_field(&self, id: i64) -> Result<Field> {
         self.conn
             .prepare_cached("SELECT field FROM tags WHERE tags.id = ?")?
-            .query_one((id,), |row| {
+            .query_row((id,), |row| {
                 from_value(row.get(0)?).map_err(|e| {
                     Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
                 })
