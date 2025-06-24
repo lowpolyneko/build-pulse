@@ -75,7 +75,7 @@ desc = "Java Exception Stack Trace"
 # 	at hudson.remoting.SynchronousCommandTransport$ReaderThread.run(SynchronousCommandTransport.java:90)
 pattern = '''(?m)^([a-zA-Z]+: .*\n([a-z]+\.)+[a-zA-Z]+(\n\s+.*)*)+$'''
 from = "Console"
-severity = "Error"
+severity = "Warning"
 
 [[tag]]
 name = "mpi_abort"

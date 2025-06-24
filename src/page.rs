@@ -6,6 +6,7 @@ use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
     api::{SparseJob, SparseMatrixProject},
+    config::Severity,
     db::{Database, InDatabase, Run},
 };
 
@@ -123,11 +124,13 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                             }
                         }
                         hr;
-                        @for i in issues {
-                            pre {
-                                (PreEscaped(i.snippet))
+                        @for (i, s) in issues {
+                            @if !matches!(s, Severity::Metadata) {
+                                pre {
+                                    (PreEscaped(i.snippet))
+                                }
+                                hr;
                             }
-                            hr;
                         }
                     }
                 }
@@ -236,16 +239,18 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
             "By Tag"
         }
         table style="border: 1px solid black;" {
-            @for (name, desc, count) in stats.tag_counts {
-                tr style="border: 1px solid black;" {
-                    td style="border: 1px solid black;" {
-                        code title=(desc) {
-                            (name)
+            @for (name, desc, severity, count) in stats.tag_counts {
+                @if !matches!(severity, Severity::Metadata) {
+                    tr style="border: 1px solid black;" {
+                        td style="border: 1px solid black;" {
+                            code title=(desc) {
+                                (name)
+                            }
                         }
-                    }
-                    td style="border: 1px solid black;" {
-                        (count)
-                        " issues"
+                        td style="border: 1px solid black;" {
+                            (count)
+                            " issues"
+                        }
                     }
                 }
             }

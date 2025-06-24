@@ -5,7 +5,7 @@ use rusqlite::{Connection, Error, Result};
 use serde_json::{from_value, to_value};
 
 use crate::{
-    config::Field,
+    config::{Field, Severity},
     parse::{Tag, TagSet},
 };
 
@@ -48,7 +48,7 @@ pub struct Statistics {
     pub aborted: u64,
     pub not_built: u64,
     pub issues_found: u64,
-    pub tag_counts: Vec<(String, String, u64)>,
+    pub tag_counts: Vec<(String, String, Severity, u64)>,
 }
 
 pub struct InDatabase<T> {
@@ -210,11 +210,14 @@ impl Database {
             .collect()
     }
 
-    pub fn get_issues<'a>(&self, run: &'a InDatabase<Run>) -> Result<Vec<InDatabase<Issue<'a>>>> {
+    pub fn get_issues<'a>(
+        &self,
+        run: &'a InDatabase<Run>,
+    ) -> Result<Vec<(InDatabase<Issue<'a>>, Severity)>> {
         self.conn
-            .prepare_cached("SELECT issues.id, snippet_start, snippet_end, run_id, tag_id, field FROM issues JOIN tags ON tags.id = issues.tag_id WHERE issues.run_id = ?")?
+            .prepare_cached("SELECT issues.id, snippet_start, snippet_end, run_id, tag_id, field, severity FROM issues JOIN tags ON tags.id = issues.tag_id WHERE issues.run_id = ?")?
             .query_map((run.id,), |row| {
-                Ok(InDatabase::new(
+                Ok((InDatabase::new(
                     row.get(0)?,
                     Issue {
                         snippet: &match read_value!(row, 5) {
@@ -227,7 +230,7 @@ impl Database {
                             [row.get(1)?..row.get(2)?],
                         tag: row.get(4)?,
                     }
-                ))
+                ), read_value!(row, 6)))
             })?
             .collect()
     }
@@ -279,15 +282,16 @@ impl Database {
                 stats
             });
 
+        // don't count metadata issues in total
         stats.issues_found = self
             .conn
-            .prepare("SELECT COUNT(*) FROM issues")?
-            .query_one((), |row| row.get(0))?;
+            .prepare("SELECT COUNT(*) FROM issues JOIN tags ON tags.id = issues.tag_id WHERE tags.severity != ?")?
+            .query_one((write_value!(Severity::Metadata),), |row| row.get(0))?;
 
         stats.tag_counts = self
             .conn
-            .prepare("SELECT name, desc, COUNT(*) FROM issues JOIN tags ON tags.id = issues.tag_id GROUP BY issues.tag_id")?
-            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .prepare("SELECT name, desc, severity, COUNT(*) FROM issues JOIN tags ON tags.id = issues.tag_id GROUP BY issues.tag_id")?
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, read_value!(row, 2), row.get(3)?)))?
             .collect::<Result<Vec<_>>>()?;
 
         Ok(stats)
