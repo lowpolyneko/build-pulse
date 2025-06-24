@@ -110,7 +110,6 @@ impl Database {
                 desc            TEXT NOT NULL,
                 field           TEXT NOT NULL,
                 severity        TEXT NOT NULL,
-                UNIQUE(name)
             ) STRICT;
             COMMIT;
             ",
@@ -157,10 +156,10 @@ impl Database {
     }
 
     pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
-        // TODO: Prune old tags
+        // TODO: Prune old tags and disallow duplicates by improving ID retrieval on 172
         let mut stmt = self
             .conn
-            .prepare("INSERT INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET desc = excluded.desc, field = excluded.field, severity = excluded.severity")?;
+            .prepare("INSERT INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?)")?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,
