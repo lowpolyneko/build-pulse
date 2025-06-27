@@ -69,7 +69,7 @@ fn pull_build_logs(
             Err(e) => Err(e),
         })
         .map(|res| match res {
-            Ok((job, build, full_mb)) => Ok((job, build, full_mb.as_run(jenkins)?)),
+            Ok((job, build, full_mb)) => Ok((job, build, full_mb.as_run(jenkins))),
             Err(e) => Err(e),
         })
         .map(|res| match res {

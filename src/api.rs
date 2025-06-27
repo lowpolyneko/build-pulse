@@ -34,7 +34,7 @@ pub struct SparseBuild {
 }
 
 pub trait AsRun {
-    fn as_run(&self, jenkins_client: &Jenkins) -> Result<Run>;
+    fn as_run(&self, jenkins_client: &Jenkins) -> Run;
 }
 
 pub trait HasBuildFields {
@@ -73,22 +73,27 @@ impl<T> AsRun for T
 where
     T: Build + HasBuildFields,
 {
-    fn as_run(&self, jenkins_client: &Jenkins) -> Result<Run> {
+    fn as_run(&self, jenkins_client: &Jenkins) -> Run {
+        let display_name = self.full_display_name_or_default();
         let status = self.build_status();
-        Ok(Run {
+        Run {
             build_url: self.url().to_string(),
-            display_name: self.full_display_name_or_default().to_string(),
+            display_name: display_name.to_string(),
             status,
             log: match status {
-                Some(BuildStatus::Failure | BuildStatus::Unstable) => Some(
-                    // only get log on failure
+                Some(BuildStatus::Failure | BuildStatus::Unstable) =>
+                // only get log on failure
+                {
                     self.get_console(jenkins_client)
-                        .map_err(Error::from_boxed)?,
-                ),
+                        .map_err(|e| {
+                            log::error!("Failed to retrieve build log for run {display_name}: {e}")
+                        })
+                        .ok()
+                }
                 _ => None,
             },
             tag_schema: None,
-        })
+        }
     }
 }
 
