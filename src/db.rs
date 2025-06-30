@@ -95,7 +95,8 @@ impl Database {
             CREATE TABLE IF NOT EXISTS jobs (
                 id              INTEGER PRIMARY KEY,
                 name            TEXT NOT NULL,
-                last_build      INTEGER
+                last_build      INTEGER,
+                UNIQUE(name)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS runs (
                 id              INTEGER PRIMARY KEY,
@@ -125,7 +126,8 @@ impl Database {
                 name            TEXT NOT NULL,
                 desc            TEXT NOT NULL,
                 field           TEXT NOT NULL,
-                severity        TEXT NOT NULL
+                severity        TEXT NOT NULL,
+                UNIQUE(name)
             ) STRICT;
             COMMIT;
             ",
@@ -134,11 +136,18 @@ impl Database {
         Ok(Database { conn })
     }
 
-    pub fn insert_job(&self, job: Job) -> Result<InDatabase<Job>> {
+    pub fn upsert_job(&self, job: Job) -> Result<InDatabase<Job>> {
         self.conn
-            .prepare_cached("INSERT INTO jobs (name, last_build) VALUES (?, ?)")?
+            .prepare_cached(
+                "
+                INSERT INTO jobs (name, last_build) VALUES (?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        last_build = excluded.last_build
+                ",
+            )?
             .execute((&job.name, job.last_build))?;
-        Ok(InDatabase::new(self.conn.last_insert_rowid(), job))
+
+        self.get_job(&job.name)
     }
 
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
@@ -180,11 +189,16 @@ impl Database {
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
 
-    pub fn insert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
-        // TODO: Prune old tags and disallow duplicates by improving ID retrieval on 172
-        let mut stmt = self
-            .conn
-            .prepare("INSERT INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?)")?;
+    pub fn upsert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
+        let mut stmt = self.conn.prepare(
+            "
+            INSERT INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    desc = excluded.desc,
+                    field = excluded.field,
+                    severity = excluded.severity
+            ",
+        )?;
         tags.try_swap_tags(|t| {
             stmt.execute((
                 t.name,
@@ -193,7 +207,7 @@ impl Database {
                 write_value!(t.severity),
             ))?;
 
-            Ok(InDatabase::new(self.conn.last_insert_rowid(), t))
+            Ok(InDatabase::new(self.get_tag_id(t.name)?, t))
         })
     }
 
@@ -287,10 +301,16 @@ impl Database {
             .collect()
     }
 
+    pub fn get_tag_id(&self, name: &str) -> Result<i64> {
+        self.conn
+            .prepare_cached("SELECT id FROM tags WHERE name = ?")?
+            .query_one((name,), |row| row.get(0))
+    }
+
     pub fn get_tag_field(&self, id: i64) -> Result<Field> {
         self.conn
             .prepare_cached("SELECT field FROM tags WHERE tags.id = ?")?
-            .query_row((id,), |row| {
+            .query_one((id,), |row| {
                 from_value(row.get(0)?).map_err(|e| {
                     Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
                 })
@@ -363,10 +383,40 @@ impl Database {
         )
     }
 
+    pub fn purge_old_runs(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "
+            BEGIN;
+            DELETE FROM issues WHERE id IN (
+                SELECT issues.id FROM issues
+                    JOIN runs ON runs.id = issues.run_id
+                    JOIN jobs ON jobs.id = runs.job_id
+                    WHERE build_no != last_build
+            );
+            DELETE FROM runs WHERE id IN (
+                SELECT runs.id FROM runs
+                    JOIN jobs ON jobs.id = runs.job_id
+                    WHERE build_no != last_build
+            );
+            COMMIT;
+            ",
+        )
+    }
+
+    pub fn purge_orphan_tags(&self) -> Result<usize> {
+        self.conn.execute(
+            "
+            DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM issues WHERE tags.id = issues.tag_id)
+            ",
+            (),
+        )
+    }
+
     pub fn purge_cache(&self) -> Result<()> {
         self.conn.execute_batch(
             "
             BEGIN;
+            DELETE FROM jobs;
             DELETE FROM runs;
             DELETE FROM issues;
             DELETE FROM tags;

@@ -54,19 +54,14 @@ fn pull_build_logs(
         .flat_map(|(job, build)| build.runs.par_iter().map(move |mb| (job, build, mb)))
         .filter(|(_, build, mb)| mb.number == build.number)
         .map(|(job, build, mb)| {
-            let db_job = db.lock().unwrap().get_job(&job.name);
-            match db_job {
-                Ok(x) => Ok((x, build, mb)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok((
-                    db.lock()
-                        .unwrap()
-                        .insert_job(job.as_job())
-                        .map_err(Error::from)?,
-                    build,
-                    mb,
-                )),
-                Err(e) => Err(Error::from(e)),
-            }
+            Ok((
+                db.lock()
+                    .unwrap()
+                    .upsert_job(job.as_job())
+                    .map_err(Error::from)?,
+                build,
+                mb,
+            ))
         })
         .filter_map(|res| match res {
             Ok((db_job, build, mb)) => match db.lock().unwrap().get_run(&mb.url) {
@@ -174,7 +169,7 @@ fn main() -> Result<()> {
 
     // update TagSet
     info!("Updating tags...");
-    let tags = database.insert_tags(tags)?;
+    let tags = database.upsert_tags(tags)?;
 
     // purge outdated issues
     let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;
@@ -213,6 +208,12 @@ fn main() -> Result<()> {
     info!("----------------------------------------");
 
     let database = database.into_inner().unwrap();
+
+    info!("Purging old runs...");
+    database.purge_old_runs()?;
+
+    info!("Purging extraneous tags...");
+    database.purge_orphan_tags()?;
 
     if let Some(output) = args.output {
         info!("Generating report...");
