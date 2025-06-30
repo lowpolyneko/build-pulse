@@ -33,7 +33,8 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
             Some(BuildStatus::Failure) => 0,
             Some(BuildStatus::Unstable) => 1,
             Some(BuildStatus::Success) => 2,
-            Some(BuildStatus::NotBuilt | BuildStatus::Aborted) => 3,
+            Some(BuildStatus::NotBuilt) => 3,
+            Some(BuildStatus::Aborted) => 4,
             None => 4,
         });
 
@@ -62,12 +63,13 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
                         Some(BuildStatus::Success) => "good",
                         Some(BuildStatus::Failure) => "bad",
                         Some(BuildStatus::Unstable) => "unstable",
-                        Some(BuildStatus::NotBuilt | BuildStatus::Aborted) => "not built",
+                        Some(BuildStatus::NotBuilt) => "not built",
+                        Some(BuildStatus::Aborted) => "aborted",
                         None => "no build",
                     }
                 }
             }
-            details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable))] {
+            details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
                 table style="border: 1px solid black;" {
                     @if let Some(runs) = sorted_runs {
                         @for run in runs {
@@ -99,7 +101,8 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         Some(BuildStatus::Success) => "good",
                         Some(BuildStatus::Failure) => "bad",
                         Some(BuildStatus::Unstable) => "unstable",
-                        Some(BuildStatus::NotBuilt | BuildStatus::Aborted) => "not built",
+                        Some(BuildStatus::NotBuilt) => "not built",
+                        Some(BuildStatus::Aborted) => "aborted",
                         None => "no build",
                     }
                 }
