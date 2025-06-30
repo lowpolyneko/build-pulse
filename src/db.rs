@@ -36,6 +36,7 @@ pub struct Run {
     pub job: i64,
     pub build_url: String,
     pub display_name: String,
+    pub build_no: u32,
     pub status: Option<BuildStatus>,
     pub log: Option<String>,
     pub tag_schema: Option<u64>,
@@ -100,6 +101,7 @@ impl Database {
                 id              INTEGER PRIMARY KEY,
                 build_url       TEXT NOT NULL,
                 display_name    TEXT NOT NULL,
+                build_no        INTEGER NOT NULL,
                 status          TEXT,
                 log             TEXT,
                 tag_schema      INTEGER,
@@ -141,11 +143,12 @@ impl Database {
 
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
         self.conn.prepare_cached(
-            "INSERT INTO runs (build_url, display_name, status, log, tag_schema, job_id) VALUES (?, ?, ?, ?, ?, ?)")?
+            "INSERT INTO runs (build_url, display_name, build_no, status, log, tag_schema, job_id) VALUES (?, ?, ?, ?, ?, ?, ?)")?
             .execute(
                 (
                     &run.build_url,
                     &run.display_name,
+                    run.build_no,
                     write_value!(run.status),
                     &run.log,
                     run.tag_schema.map(u64::cast_signed),
@@ -210,17 +213,18 @@ impl Database {
 
     pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
         self.conn.prepare_cached(
-            "SELECT id, build_url, display_name, status, log, tag_schema, job_id FROM runs WHERE build_url = ?")?
+            "SELECT id, build_url, display_name, build_no, status, log, tag_schema, job_id FROM runs WHERE build_url = ?")?
             .query_one((build_url,), |row| {
                     Ok(InDatabase::new(
                         row.get(0)?,
                         Run {
                             build_url: row.get(1)?,
                             display_name: row.get(2)?,
-                            status: read_value!(row, 3),
-                            log: row.get(4)?,
-                            tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
-                            job: row.get(6)?,
+                            build_no: row.get(3)?,
+                            status: read_value!(row, 4),
+                            log: row.get(5)?,
+                            tag_schema: row.get::<_, Option<i64>>(6)?.map(i64::cast_unsigned),
+                            job: row.get(7)?,
                         },
                     ))
                 },
@@ -230,7 +234,7 @@ impl Database {
     pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
         self.conn
             .prepare_cached(
-                "SELECT id, build_url, display_name, status, log, tag_schema, job_id FROM runs",
+                "SELECT id, build_url, display_name, build_no, status, log, tag_schema, job_id FROM runs",
             )?
             .query_map((), |row| {
                 Ok(InDatabase::new(
@@ -238,10 +242,11 @@ impl Database {
                     Run {
                         build_url: row.get(1)?,
                         display_name: row.get(2)?,
-                        status: read_value!(row, 3),
-                        log: row.get(4)?,
-                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
-                        job: row.get(6)?,
+                        build_no: row.get(3)?,
+                        status: read_value!(row, 4),
+                        log: row.get(5)?,
+                        tag_schema: row.get::<_, Option<i64>>(6)?.map(i64::cast_unsigned),
+                        job: row.get(7)?,
                     },
                 ))
             })?
@@ -334,6 +339,7 @@ impl Database {
 
         Ok(stats)
     }
+
     pub fn update_tag_schema_for_runs(&self, new_schema: Option<u64>) -> Result<usize> {
         self.conn.execute(
             "UPDATE runs SET tag_schema = ?",

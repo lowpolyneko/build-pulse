@@ -42,6 +42,7 @@ pub trait AsJob {
 }
 
 pub trait HasBuildFields {
+    fn number(&self) -> u32;
     fn build_status(&self) -> Option<BuildStatus>;
     fn full_display_name_or_default(&self) -> &str;
 }
@@ -49,6 +50,10 @@ pub trait HasBuildFields {
 macro_rules! impl_HasBuildFields {
     (for $($t:ty),+) => {
         $(impl HasBuildFields for $t {
+            fn number(&self) -> u32 {
+                self.number
+            }
+
             fn build_status(&self) -> Option<BuildStatus> {
                 self.result
             }
@@ -93,6 +98,7 @@ where
             job: job_id,
             build_url: self.url().to_string(),
             display_name: display_name.to_string(),
+            build_no: self.number(),
             status,
             log: match status {
                 Some(BuildStatus::Failure | BuildStatus::Unstable) =>
