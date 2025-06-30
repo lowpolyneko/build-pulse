@@ -1,3 +1,4 @@
+//! A Jenkins CI/CD-based build analyzer and issue prioritizer.
 use std::{fs, sync::Mutex};
 
 use anyhow::{Error, Result};
@@ -21,19 +22,24 @@ mod db;
 mod page;
 mod parse;
 
+/// CLI arguments
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Config file path
     #[arg(default_value = "config.toml")]
     config: String,
 
+    /// Report output (`Some(None)` for stdout) path
     #[arg(short, long)]
     output: Option<Option<String>>,
 
+    /// Whether or not to purge cache
     #[arg(short, long)]
     purge_cache: bool,
 }
 
+/// Pull builds from `project.jobs` and cache them into database `db`
 fn pull_build_logs(
     project: &SparseMatrixProject,
     jenkins: &Jenkins,
@@ -43,6 +49,7 @@ fn pull_build_logs(
         .jobs
         .par_iter()
         .filter_map(|job| {
+            // filter out jobs with no builds
             job.last_build.as_ref().map_or_else(
                 || {
                     info!("Job '{}' has no builds.", job.name);
@@ -52,7 +59,7 @@ fn pull_build_logs(
             )
         })
         .flat_map(|(job, build)| build.runs.par_iter().map(move |mb| (job, build, mb)))
-        .filter(|(_, build, mb)| mb.number == build.number)
+        .filter(|(_, build, mb)| mb.number == build.number) // filter out runs w/o matching build
         .map(|(job, build, mb)| {
             Ok((
                 db.lock()
@@ -65,7 +72,7 @@ fn pull_build_logs(
         })
         .filter_map(|res| match res {
             Ok((db_job, build, mb)) => match db.lock().unwrap().get_run(&mb.url) {
-                Ok(_) => None,
+                Ok(_) => None, // cached
                 Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, build, mb))),
                 Err(e) => Some(Err(Error::from(e))),
             },
@@ -82,7 +89,7 @@ fn pull_build_logs(
         .map(|res| match res {
             Ok((db_job, build, full_mb)) => {
                 let id = db_job.id;
-                Ok((db_job, build, full_mb.as_run(id, jenkins)))
+                Ok((db_job, build, full_mb.as_run(id, jenkins))) // build log is pulled here
             }
             Err(e) => Err(e),
         })
@@ -110,11 +117,12 @@ fn pull_build_logs(
         })
 }
 
+/// Parse all untagged runs for `tags` and cache them into database `db`
 fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
     let runs = db.lock().unwrap().get_all_runs()?;
 
     runs.par_iter()
-        .flat_map_iter(|run| Field::iter().map(move |f| (run, f)))
+        .flat_map_iter(|run| Field::iter().map(move |f| (run, f))) // parse all fields
         .filter_map(|(run, field)| match (run.tag_schema, &run.log, field) {
             (None, Some(log), Field::Console) => Some((run, field, log)),
             (None, Some(_), Field::RunName) => Some((run, field, &run.display_name)),
@@ -209,6 +217,7 @@ fn main() -> Result<()> {
 
     let database = database.into_inner().unwrap();
 
+    // purge old data
     info!("Purging old runs...");
     database.purge_old_runs()?;
 

@@ -1,3 +1,4 @@
+//! HTML report generation using [maud] templating.
 use std::time::SystemTime;
 
 use jenkins_api::{build::BuildStatus, job::Job};
@@ -10,6 +11,7 @@ use crate::{
     db::{Database, InDatabase, Run},
 };
 
+/// Format `time` as a [String]
 fn format_timestamp<T>(time: T) -> String
 where
     T: Into<OffsetDateTime>,
@@ -21,6 +23,7 @@ where
         .unwrap()
 }
 
+/// Render a [SparseJob]
 fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
     let sorted_runs = job.last_build.as_ref().map(|j| {
         let mut runs = j
@@ -86,6 +89,7 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
     }
 }
 
+/// Render a [Run]
 fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
     let row_border = match run.status {
         Some(BuildStatus::Failure | BuildStatus::Unstable) => {
@@ -145,6 +149,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
     }
 }
 
+/// Render [crate::db::Statistics]
 fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
     let stats = db
         .get_stats()
@@ -295,6 +300,7 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
     }
 }
 
+/// Render an HTML report for `project`
 pub fn render(project: &SparseMatrixProject, db: &Database, tz: UtcOffset) -> Markup {
     let time: OffsetDateTime = SystemTime::now().into();
     html! {

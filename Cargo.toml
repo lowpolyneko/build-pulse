@@ -1,5 +1,7 @@
 [package]
 name = "build-pulse"
+description = "Build analyzer and issue prioritizer for Jenkins CI/CD projects."
+authors = ["Ethan Wong <ewong@anl.gov>"]
 version = "0.1.0"
 edition = "2024"
 

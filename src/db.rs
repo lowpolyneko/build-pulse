@@ -1,3 +1,4 @@
+//! [rusqlite] based ORM to cache build results.
 use std::ops::{Deref, DerefMut};
 
 use jenkins_api::build::BuildStatus;
@@ -9,6 +10,7 @@ use crate::{
     parse::{Tag, TagSet},
 };
 
+/// Read [serde] serialized value from `row` and `idx`
 macro_rules! read_value {
     ($row:ident, $idx:literal) => {
         from_value($row.get($idx)?).map_err(|e| {
@@ -17,58 +19,103 @@ macro_rules! read_value {
     };
 }
 
+/// Write as [serde] serializable value
 macro_rules! write_value {
     ($val:expr) => {
         to_value($val).map_err(|e| Error::ToSqlConversionFailure(e.into()))?
     };
 }
 
+/// Database object
 pub struct Database {
+    /// Internal [rusqlite] connection
     conn: Connection,
 }
 
+/// [Job] stored in [Database]
 pub struct Job {
+    /// Unique name of [Job]
     pub name: String,
+
+    /// Last build number
     pub last_build: Option<u32>,
 }
 
+/// [Run] stored in [Database]
 pub struct Run {
+    /// ID of associated [Job]
     pub job: i64,
+
+    /// Build url
     pub build_url: String,
+
+    /// Build `display_name`
     pub display_name: String,
+
+    /// Build number
     pub build_no: u32,
+
+    /// Build status
     pub status: Option<BuildStatus>,
+
+    /// Full console log
     pub log: Option<String>,
+
+    /// Schema [Run] was parsed with
     pub tag_schema: Option<u64>,
 }
 
+/// [Issue] stored in [Database]
 pub struct Issue<'a> {
+    /// String snippet from [Run]
     pub snippet: &'a str,
+
+    /// [Tag] associated with [Issue]
     pub tag: i64,
 }
 
+/// Statistics of [Issue]s and [Run]s in [Database]
 #[derive(Default)]
 pub struct Statistics {
+    /// Successful [Run]s
     pub successful: u64,
+
+    /// Unstable [Run]s
     pub unstable: u64,
+
+    /// Failed [Run]s
     pub failures: u64,
+
+    /// Aborted [Run]s
     pub aborted: u64,
+
+    /// Not built [Run]s
     pub not_built: u64,
+
+    /// Total [Issue]s found
     pub issues_found: u64,
+
+    /// Counts of each [Tag] found
     pub tag_counts: Vec<(String, String, Severity, u64)>,
 }
 
+/// Represents an item `T` in [Database]
 pub struct InDatabase<T> {
+    /// Row ID of `item`
     pub id: i64,
+
+    /// Item itself
     item: T,
 }
 
 impl<T> InDatabase<T> {
+    /// Wrap item in [InDatabase] with new `id` from [Database]
     fn new(id: i64, item: T) -> Self {
         InDatabase { id, item }
     }
 }
 
+// Implicit deref to `T` from [InDatabase]
 impl<T> Deref for InDatabase<T> {
     type Target = T;
 
@@ -77,6 +124,7 @@ impl<T> Deref for InDatabase<T> {
     }
 }
 
+// Implicit deref_mut to `T` from [InDatabase]
 impl<T> DerefMut for InDatabase<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.item
@@ -84,6 +132,7 @@ impl<T> DerefMut for InDatabase<T> {
 }
 
 impl Database {
+    /// Open or create an `sqlite3` database at `path` returning [Database]
     pub fn open(path: &str) -> Result<Database> {
         // try to open existing, otherwise create a new one
         let conn = Connection::open(path)?;
@@ -136,6 +185,7 @@ impl Database {
         Ok(Database { conn })
     }
 
+    /// Upsert a [Job] into [Database]
     pub fn upsert_job(&self, job: Job) -> Result<InDatabase<Job>> {
         self.conn
             .prepare_cached(
@@ -147,9 +197,11 @@ impl Database {
             )?
             .execute((&job.name, job.last_build))?;
 
+        // get the job as a second query in-case of an insert conflict
         self.get_job(&job.name)
     }
 
+    /// Insert a [Run] into [Database]
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
         self.conn.prepare_cached(
             "INSERT INTO runs (build_url, display_name, build_no, status, log, tag_schema, job_id) VALUES (?, ?, ?, ?, ?, ?, ?)")?
@@ -167,6 +219,7 @@ impl Database {
         Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
     }
 
+    /// Insert a [Run]'s [Issue] into [Database]
     pub fn insert_issue<'a>(
         &self,
         run: &'a InDatabase<Run>,
@@ -189,6 +242,7 @@ impl Database {
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
 
+    /// Upsert a [TagSet] into [Database]
     pub fn upsert_tags<'a>(&self, tags: TagSet<Tag<'a>>) -> Result<TagSet<InDatabase<Tag<'a>>>> {
         let mut stmt = self.conn.prepare(
             "
@@ -207,10 +261,12 @@ impl Database {
                 write_value!(t.severity),
             ))?;
 
+            // get the tag id as a second query in-case of an insert conflict
             Ok(InDatabase::new(self.get_tag_id(t.name)?, t))
         })
     }
 
+    /// Get a [Job] from [Database]
     pub fn get_job(&self, name: &str) -> Result<InDatabase<Job>> {
         self.conn
             .prepare_cached("SELECT id, last_build FROM jobs WHERE name = ?")?
@@ -225,6 +281,7 @@ impl Database {
             })
     }
 
+    /// Get a [Run] from [Database]
     pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
         self.conn.prepare_cached(
             "SELECT id, build_url, display_name, build_no, status, log, tag_schema, job_id FROM runs WHERE build_url = ?")?
@@ -245,6 +302,7 @@ impl Database {
             )
     }
 
+    /// Get all [Run]s from [Database]
     pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
         self.conn
             .prepare_cached(
@@ -267,6 +325,7 @@ impl Database {
             .collect()
     }
 
+    /// Get all [Issue]s from [Database]
     pub fn get_issues<'a>(
         &self,
         run: &'a InDatabase<Run>,
@@ -281,7 +340,7 @@ impl Database {
                                 Field::Console => run
                                                     .log
                                                     .as_ref()
-                                                    .expect("Issue references non-existant log!"),
+                                                    .expect("Issue references non-existent log!"),
                                 Field::RunName => &run.display_name,
                             }
                             [row.get(1)?..row.get(2)?],
@@ -292,6 +351,7 @@ impl Database {
             .collect()
     }
 
+    /// Get all [Tag]s from [Database]
     pub fn get_tags(&self, run: &InDatabase<Run>) -> Result<Vec<(String, String)>> {
         self.conn
             .prepare_cached(
@@ -301,12 +361,14 @@ impl Database {
             .collect()
     }
 
+    /// Get a [Tag]'s ID from [Database]
     pub fn get_tag_id(&self, name: &str) -> Result<i64> {
         self.conn
             .prepare_cached("SELECT id FROM tags WHERE name = ?")?
             .query_one((name,), |row| row.get(0))
     }
 
+    /// Get a [Tag]'s [Field] from [Database]
     pub fn get_tag_field(&self, id: i64) -> Result<Field> {
         self.conn
             .prepare_cached("SELECT field FROM tags WHERE tags.id = ?")?
@@ -317,6 +379,7 @@ impl Database {
             })
     }
 
+    /// Gets [Database]'s [Statistics]
     pub fn get_stats(&self) -> Result<Statistics> {
         // calculate success/failures for all runs
         let mut stats = self
@@ -360,6 +423,7 @@ impl Database {
         Ok(stats)
     }
 
+    /// Update the [TagSet] schema for all [Run]s in [Database]
     pub fn update_tag_schema_for_runs(&self, new_schema: Option<u64>) -> Result<usize> {
         self.conn.execute(
             "UPDATE runs SET tag_schema = ?",
@@ -367,12 +431,13 @@ impl Database {
         )
     }
 
+    /// Remove all [Issue]s with an outdated [TagSet] schema from [Database]
     pub fn purge_invalid_issues_by_tag_schema(&mut self, current_schema: u64) -> Result<usize> {
         let mut tx = self.conn.transaction()?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
 
         tx.execute(
-            "DELETE FROM issues WHERE ROWID IN (SELECT i.ROWID FROM issues i INNER JOIN runs r ON i.run_id = r.id WHERE r.tag_schema != ?)",
+            "DELETE FROM issues WHERE id IN (SELECT i.id FROM issues i INNER JOIN runs r ON i.run_id = r.id WHERE r.tag_schema != ?)",
             (current_schema.cast_signed(),),
         )?;
 
@@ -383,6 +448,7 @@ impl Database {
         )
     }
 
+    /// Remove all [Run]s which aren't referenced by [Job] from [Database]
     pub fn purge_old_runs(&self) -> Result<()> {
         self.conn.execute_batch(
             "
@@ -403,6 +469,7 @@ impl Database {
         )
     }
 
+    /// Remove all [Tag]s which aren't referenced by [Issue]s from [Database]
     pub fn purge_orphan_tags(&self) -> Result<usize> {
         self.conn.execute(
             "
@@ -412,6 +479,7 @@ impl Database {
         )
     }
 
+    /// Purge all rows (but not tables) from [Database]
     pub fn purge_cache(&self) -> Result<()> {
         self.conn.execute_batch(
             "

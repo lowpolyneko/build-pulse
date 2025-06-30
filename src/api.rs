@@ -1,3 +1,4 @@
+//! Structs and methods to interface with Jenkins via the [jenkins_api] crate.
 use anyhow::{Error, Result};
 use jenkins_api::{
     Jenkins,
@@ -9,44 +10,75 @@ use serde::Deserialize;
 
 use crate::db::Run;
 
+/// Represents all jobs pulled from [SparseMatrixProject::pull_jobs]
 #[derive(Deserialize)]
 pub struct SparseMatrixProject {
+    /// [Vec] of [SparseJob]s
     pub jobs: Vec<SparseJob>,
 }
 
+/// Represents a job pulled from [SparseMatrixProject::pull_jobs]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SparseJob {
+    /// Name of the job
     pub name: String,
+
+    /// URL of the job
     pub url: String,
+
+    /// Last build of job as a [SparseBuild]
     pub last_build: Option<SparseBuild>,
 }
 
+/// Represents a job build pulled from [SparseMatrixProject::pull_jobs]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SparseBuild {
+    /// Build number
     pub number: u32,
+
+    /// Build URL
     pub url: String,
+
+    /// Build display name
     pub display_name: String,
+
+    /// Build timestamp
     pub timestamp: u64,
+
+    /// Build result as a [BuildStatus]
     pub result: Option<BuildStatus>,
+
+    /// Build runs as a [Vec] of [ShortBuild]s
     pub runs: Vec<ShortBuild>,
 }
 
+/// Builds that can be represented as [Run]
 pub trait AsRun {
+    /// Convert `&self` to [Run]
     fn as_run(&self, job_id: i64, jenkins_client: &Jenkins) -> Run;
 }
 
+/// Jobs that can be represented as [Job]
 pub trait AsJob {
+    /// Convert `&self` to [Job]
     fn as_job(&self) -> crate::db::Job;
 }
 
+/// [Build]s with common fields
 pub trait HasBuildFields {
+    /// Get build number
     fn number(&self) -> u32;
+
+    /// Get [BuildStatus]
     fn build_status(&self) -> Option<BuildStatus>;
+
+    /// Get `display_name`
     fn full_display_name_or_default(&self) -> &str;
 }
 
+/// Works for most [jenkins_api::build] structs
 macro_rules! impl_HasBuildFields {
     (for $($t:ty),+) => {
         $(impl HasBuildFields for $t {
@@ -118,6 +150,7 @@ where
 }
 
 impl SparseMatrixProject {
+    /// Query the Jenkins build server for all jobs and their last build from a `project_name`
     pub fn pull_jobs(client: &Jenkins, project_name: &str) -> Result<Self> {
         client
             .get_object_as(
