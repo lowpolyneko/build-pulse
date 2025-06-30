@@ -26,6 +26,7 @@ macro_rules! fields {
         pub enum $name {$($member),*}
 
         impl $name {
+            #[allow(dead_code)]
             pub fn iter() -> impl Iterator<Item = $name> {
                 vec![$($name::$member,)*].into_iter()
             }

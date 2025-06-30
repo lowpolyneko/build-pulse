@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use time::UtcOffset;
 
 use crate::{
-    api::{AsRun, SparseMatrixProject},
+    api::{AsJob, AsRun, SparseMatrixProject},
     config::{Config, Field},
     db::{Database, InDatabase},
     parse::{Tag, TagSet},
@@ -53,38 +53,57 @@ fn pull_build_logs(
         })
         .flat_map(|(job, build)| build.runs.par_iter().map(move |mb| (job, build, mb)))
         .filter(|(_, build, mb)| mb.number == build.number)
-        .filter_map(
-            |(job, build, mb)| match db.lock().unwrap().get_run(&mb.url) {
+        .map(|(job, build, mb)| {
+            let db_job = db.lock().unwrap().get_job(&job.name);
+            match db_job {
+                Ok(x) => Ok((x, build, mb)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok((
+                    db.lock()
+                        .unwrap()
+                        .insert_job(job.as_job())
+                        .map_err(Error::from)?,
+                    build,
+                    mb,
+                )),
+                Err(e) => Err(Error::from(e)),
+            }
+        })
+        .filter_map(|res| match res {
+            Ok((db_job, build, mb)) => match db.lock().unwrap().get_run(&mb.url) {
                 Ok(_) => None,
-                Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((job, build, mb))),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, build, mb))),
                 Err(e) => Some(Err(Error::from(e))),
             },
-        )
+            Err(e) => Some(Err(e)),
+        })
         .map(|res| match res {
-            Ok((job, build, mb)) => Ok((
-                job,
+            Ok((db_job, build, mb)) => Ok((
+                db_job,
                 build,
                 mb.get_full_build(jenkins).map_err(Error::from_boxed)?,
             )),
             Err(e) => Err(e),
         })
         .map(|res| match res {
-            Ok((job, build, full_mb)) => Ok((job, build, full_mb.as_run(jenkins))),
+            Ok((db_job, build, full_mb)) => {
+                let id = db_job.id;
+                Ok((db_job, build, full_mb.as_run(id, jenkins)))
+            }
             Err(e) => Err(e),
         })
         .map(|res| match res {
-            Ok((job, build, run)) => Ok((job, build, db.lock().unwrap().insert_run(run)?)),
+            Ok((db_job, build, run)) => Ok((db_job, build, db.lock().unwrap().insert_run(run)?)),
             Err(e) => Err(e),
         })
         .try_for_each(|res| match res {
-            Ok((job, build, committed_run)) => {
+            Ok((db_job, build, committed_run)) => {
                 log!(
                     match committed_run.status {
                         Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
                         _ => Level::Info,
                     },
                     "Job '{}{}' run '{}' finished with status {:?}.",
-                    job.name,
+                    db_job.name,
                     build.display_name,
                     committed_run.display_name,
                     committed_run.status

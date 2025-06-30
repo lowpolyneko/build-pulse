@@ -34,7 +34,11 @@ pub struct SparseBuild {
 }
 
 pub trait AsRun {
-    fn as_run(&self, jenkins_client: &Jenkins) -> Run;
+    fn as_run(&self, job_id: i64, jenkins_client: &Jenkins) -> Run;
+}
+
+pub trait AsJob {
+    fn as_job(&self) -> crate::db::Job;
 }
 
 pub trait HasBuildFields {
@@ -69,14 +73,24 @@ impl Job for SparseJob {
     }
 }
 
+impl AsJob for SparseJob {
+    fn as_job(&self) -> crate::db::Job {
+        crate::db::Job {
+            name: self.name().to_string(),
+            last_build: self.last_build.as_ref().map(|b| b.number),
+        }
+    }
+}
+
 impl<T> AsRun for T
 where
     T: Build + HasBuildFields,
 {
-    fn as_run(&self, jenkins_client: &Jenkins) -> Run {
+    fn as_run(&self, job_id: i64, jenkins_client: &Jenkins) -> Run {
         let display_name = self.full_display_name_or_default();
         let status = self.build_status();
         Run {
+            job: job_id,
             build_url: self.url().to_string(),
             display_name: display_name.to_string(),
             status,

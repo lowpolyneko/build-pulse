@@ -27,7 +27,13 @@ pub struct Database {
     conn: Connection,
 }
 
+pub struct Job {
+    pub name: String,
+    pub last_build: Option<u32>,
+}
+
 pub struct Run {
+    pub job: i64,
     pub build_url: String,
     pub display_name: String,
     pub status: Option<BuildStatus>,
@@ -85,13 +91,21 @@ impl Database {
         conn.execute_batch(
             "
             BEGIN;
+            CREATE TABLE IF NOT EXISTS jobs (
+                id              INTEGER PRIMARY KEY,
+                name            TEXT NOT NULL,
+                last_build      INTEGER
+            ) STRICT;
             CREATE TABLE IF NOT EXISTS runs (
                 id              INTEGER PRIMARY KEY,
                 build_url       TEXT NOT NULL,
                 display_name    TEXT NOT NULL,
                 status          TEXT,
                 log             TEXT,
-                tag_schema      INTEGER
+                tag_schema      INTEGER,
+                job_id          INTEGER NOT NULL,
+                FOREIGN KEY(job_id)
+                    REFERENCES jobs(id)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS issues (
                 id              INTEGER PRIMARY KEY,
@@ -118,9 +132,16 @@ impl Database {
         Ok(Database { conn })
     }
 
+    pub fn insert_job(&self, job: Job) -> Result<InDatabase<Job>> {
+        self.conn
+            .prepare_cached("INSERT INTO jobs (name, last_build) VALUES (?, ?)")?
+            .execute((&job.name, job.last_build))?;
+        Ok(InDatabase::new(self.conn.last_insert_rowid(), job))
+    }
+
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
         self.conn.prepare_cached(
-            "INSERT INTO runs (build_url, display_name, status, log, tag_schema) VALUES (?, ?, ?, ?, ?)")?
+            "INSERT INTO runs (build_url, display_name, status, log, tag_schema, job_id) VALUES (?, ?, ?, ?, ?, ?)")?
             .execute(
                 (
                     &run.build_url,
@@ -128,6 +149,7 @@ impl Database {
                     write_value!(run.status),
                     &run.log,
                     run.tag_schema.map(u64::cast_signed),
+                    run.job,
                 ),
             )?;
         Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
@@ -172,9 +194,23 @@ impl Database {
         })
     }
 
+    pub fn get_job(&self, name: &str) -> Result<InDatabase<Job>> {
+        self.conn
+            .prepare_cached("SELECT id, last_build FROM jobs WHERE name = ?")?
+            .query_one((name,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Job {
+                        name: name.to_string(),
+                        last_build: row.get(1)?,
+                    },
+                ))
+            })
+    }
+
     pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
         self.conn.prepare_cached(
-            "SELECT id, build_url, display_name, status, log, tag_schema FROM runs WHERE build_url = ?")?
+            "SELECT id, build_url, display_name, status, log, tag_schema, job_id FROM runs WHERE build_url = ?")?
             .query_one((build_url,), |row| {
                     Ok(InDatabase::new(
                         row.get(0)?,
@@ -184,6 +220,7 @@ impl Database {
                             status: read_value!(row, 3),
                             log: row.get(4)?,
                             tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                            job: row.get(6)?,
                         },
                     ))
                 },
@@ -193,7 +230,7 @@ impl Database {
     pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
         self.conn
             .prepare_cached(
-                "SELECT id, build_url, display_name, status, log, tag_schema FROM runs",
+                "SELECT id, build_url, display_name, status, log, tag_schema, job_id FROM runs",
             )?
             .query_map((), |row| {
                 Ok(InDatabase::new(
@@ -204,6 +241,7 @@ impl Database {
                         status: read_value!(row, 3),
                         log: row.get(4)?,
                         tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        job: row.get(6)?,
                     },
                 ))
             })?
