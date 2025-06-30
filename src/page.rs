@@ -242,7 +242,7 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
             "By Tag"
         }
         table style="border: 1px solid black;" {
-            @for (name, desc, severity, count) in stats.tag_counts {
+            @for (name, desc, severity, count) in &stats.tag_counts {
                 @if !matches!(severity, Severity::Metadata) {
                     tr style="border: 1px solid black;" {
                         td style="border: 1px solid black;" {
@@ -267,6 +267,27 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
                     b {
                         (stats.issues_found)
                         " issues found!"
+                    }
+                }
+            }
+        }
+
+        h4 {
+            "By Metadata"
+        }
+        table style="border: 1px solid black;" {
+            @for (name, desc, severity, count) in &stats.tag_counts {
+                @if matches!(severity, Severity::Metadata) {
+                    tr style="border: 1px solid black;" {
+                        td style="border: 1px solid black;" {
+                            code title=(desc) {
+                                (name)
+                            }
+                        }
+                        td style="border: 1px solid black;" {
+                            (count)
+                            " runs"
+                        }
                     }
                 }
             }
