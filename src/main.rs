@@ -10,7 +10,7 @@ use time::UtcOffset;
 
 use crate::{
     api::{AsJob, AsRun, SparseMatrixProject},
-    config::{Config, Field},
+    config::{Config, Field, Severity},
     db::{Database, InDatabase},
     parse::{Tag, TagSet},
 };
@@ -132,10 +132,12 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         .try_for_each(|(run, t, i)| {
             db.lock().unwrap().insert_issue(run, i)?;
 
-            warn!(
-                "Found issue tagged '{}' in run '{}'",
-                t.name, run.display_name
-            );
+            if !matches!(t.severity, Severity::Metadata) {
+                warn!(
+                    "Found issue tagged '{}' in run '{}'",
+                    t.name, run.display_name
+                );
+            }
 
             Ok::<_, Error>(())
         })?;
