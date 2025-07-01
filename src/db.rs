@@ -156,6 +156,7 @@ impl Database {
                 log             TEXT,
                 tag_schema      INTEGER,
                 job_id          INTEGER NOT NULL,
+                UNIQUE(build_url),
                 FOREIGN KEY(job_id)
                     REFERENCES jobs(id)
             ) STRICT;
@@ -351,7 +352,7 @@ impl Database {
             .collect()
     }
 
-    /// Get all [Tag]s from [Database]
+    /// Get all [Tag]s from [Run]
     pub fn get_tags(&self, run: &InDatabase<Run>) -> Result<Vec<(String, String)>> {
         self.conn
             .prepare_cached(

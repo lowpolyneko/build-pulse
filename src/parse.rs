@@ -134,3 +134,48 @@ impl<'a> InDatabase<Tag<'a>> {
         })
     }
 }
+
+/// Calculate the Levenshtein Distance between two strings
+pub fn levenshtein_distance(a: &str, b: &str) -> usize {
+    // https://en.wikipedia.org/wiki/Levenshtein_distance#Iterative_with_two_matrix_rows
+    let b_len = match b.len() {
+        0 => return a.len(), // if b is empty, then distance is a
+        x => x,
+    };
+    let mut v1: Vec<usize> = (0..=b_len).collect(); // current row (init with edit distance from "" to b)
+
+    for (i, c1) in a.chars().enumerate() {
+        // calculate v1 distances from v0 in-place
+        let mut v0 = v1[0]; // save last substitution cost
+
+        // v1[0] is the edit distance from a[..=i] to ""
+        v1[0] = i + 1;
+
+        for (j, c2) in b.chars().enumerate() {
+            // v1[j + 1] is the character being calculated in a
+            // v1[j] is the previous character in a
+            let delete_cost = v1[j] + 1; // not including this character is better
+            let insert_cost = v1[j + 1] + 1; // keeping this character is better
+            let substitution_cost = if c1 == c2 {
+                v0 // no change
+            } else {
+                v0 + 1 // substituting this character is better
+            };
+
+            v0 = v1[j + 1]; // save last substitution cost
+            v1[j + 1] = delete_cost.min(insert_cost).min(substitution_cost);
+        }
+    }
+
+    v1[b_len]
+}
+
+/// Calculate a normalized [levenshtein_distance] using an exponential decay model
+///
+/// https://www.cse.lehigh.edu/%7Elopresti/Publications/1996/sdair96.pdf
+#[inline]
+pub fn normalized_levenshtein_distance(a: &str, b: &str) -> f32 {
+    let d = levenshtein_distance(a, b) as f32;
+    let m = a.len().max(b.len()) as f32;
+    (d / (m - d)).exp().recip()
+}

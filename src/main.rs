@@ -13,7 +13,7 @@ use crate::{
     api::{AsJob, AsRun, SparseMatrixProject},
     config::{Config, Field, Severity},
     db::{Database, InDatabase},
-    parse::{Tag, TagSet},
+    parse::{Tag, TagSet, normalized_levenshtein_distance},
 };
 
 mod api;
@@ -133,12 +133,12 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         })
         .flat_map_iter(|(run, data, t)| t.grep_issue(data).map(move |i| (run, t, i)))
         .try_for_each(|(run, t, i)| {
-            db.lock().unwrap().insert_issue(run, i)?;
+            let i = db.lock().unwrap().insert_issue(run, i)?;
 
             if !matches!(t.severity, Severity::Metadata) {
                 warn!(
-                    "Found issue tagged '{}' in run '{}'",
-                    t.name, run.display_name
+                    "Found issue '#{}' tagged '{}' in run '{}'",
+                    i.id, t.name, run.display_name
                 );
             }
 
@@ -149,6 +149,38 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
     db.lock()
         .unwrap()
         .update_tag_schema_for_runs(Some(tags.schema()))?;
+
+    Ok(())
+}
+
+fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
+    let runs = db.lock().unwrap().get_all_runs()?;
+
+    let issues: Vec<_> = runs
+        .par_iter()
+        .filter_map(|r| db.lock().unwrap().get_issues(r).ok())
+        .flatten()
+        .filter(|(_, s)| !matches!(s, Severity::Metadata))
+        .collect();
+
+    // iterate through all 2-combinations of issues
+    issues
+        .par_iter()
+        .enumerate()
+        .flat_map(|(i, issue1)| {
+            issues[i + 1..]
+                .par_iter()
+                .map(|issue2| (&issue1.0, &issue2.0))
+        })
+        .for_each(|(i1, i2)| {
+            let ld = normalized_levenshtein_distance(i1.snippet, i2.snippet);
+            if ld > 0.8 {
+                info!(
+                    "Found match between issue '#{}' and '#{}'! Similarity = {}",
+                    i1.id, i2.id, ld
+                );
+            }
+        });
 
     Ok(())
 }
@@ -211,6 +243,12 @@ fn main() -> Result<()> {
     info!("Parsing unprocessed run logs...");
 
     parse_unprocessed_runs(&tags, &database)?;
+
+    info!("Done!");
+    info!("----------------------------------------");
+    info!("Calculating issue similarities...");
+
+    calculate_similarities(&database)?;
 
     info!("Done!");
     info!("----------------------------------------");
