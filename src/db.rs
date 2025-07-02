@@ -131,6 +131,27 @@ impl<T> DerefMut for InDatabase<T> {
     }
 }
 
+// Establish ordering by the `id` primary key
+impl<T> Ord for InDatabase<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl<T> PartialOrd for InDatabase<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> PartialEq for InDatabase<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<T> Eq for InDatabase<T> {}
+
 impl Database {
     /// Open or create an `sqlite3` database at `path` returning [Database]
     pub fn open(path: &str) -> Result<Database> {
@@ -179,6 +200,18 @@ impl Database {
                 severity        TEXT NOT NULL,
                 UNIQUE(name)
             ) STRICT;
+            CREATE TABLE IF NOT EXISTS similarities (
+                id              INTEGER PRIMARY KEY,
+                issue_a_id      INTEGER NOT NULL,
+                issue_b_id      INTEGER NOT NULL,
+                similarity      REAL NOT NULL,
+                FOREIGN KEY(issue_a_id)
+                    REFERENCES issues(id),
+                FOREIGN KEY(issue_b_id)
+                    REFERENCES issues(id)
+            ) STRICT;
+            CREATE UNIQUE INDEX IF NOT EXISTS relation
+                ON similarities (issue_a_id, issue_b_id);
             COMMIT;
             ",
         )?;
@@ -241,6 +274,24 @@ impl Database {
                 .execute((start, end, run.id, issue.tag))?;
         }
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
+    }
+
+    /// Insert an [Issue] similarity into [Database]
+    pub fn insert_similarity(
+        &self,
+        issue_a: &InDatabase<Issue>,
+        issue_b: &InDatabase<Issue>,
+        similarity: f32,
+    ) -> Result<i64> {
+        self.conn
+            .prepare_cached(
+                "
+                INSERT OR IGNORE INTO similarities (issue_a_id, issue_b_id, similarity) VALUES (?, ?, ?)
+                ",
+            )?
+            .execute((issue_a.id, issue_b.id, similarity))?;
+
+        Ok(self.conn.last_insert_rowid())
     }
 
     /// Upsert a [TagSet] into [Database]
@@ -437,6 +488,21 @@ impl Database {
         let mut tx = self.conn.transaction()?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
 
+        // delete similarities first
+        tx.execute(
+            "
+            DELETE FROM similarities WHERE id IN (
+                SELECT similarities.id FROM similarities
+                    JOIN issues ON issues.id = similarities.issue_a_id
+                        OR issues.id = similarities.issue_b_id
+                    JOIN runs ON runs.id = issues.run_id
+                    WHERE runs.tag_schema = ?
+            )
+            ",
+            (current_schema.cast_signed(),),
+        )?;
+
+        // then issues
         tx.execute(
             "DELETE FROM issues WHERE id IN (SELECT i.id FROM issues i INNER JOIN runs r ON i.run_id = r.id WHERE r.tag_schema != ?)",
             (current_schema.cast_signed(),),
@@ -454,6 +520,14 @@ impl Database {
         self.conn.execute_batch(
             "
             BEGIN;
+            DELETE FROM similarities WHERE id IN (
+                SELECT similarities.id FROM similarities
+                    JOIN issues ON issues.id = similarities.issue_a_id
+                        OR issues.id = similarities.issue_b_id
+                    JOIN runs ON runs.id = issues.run_id
+                    JOIN jobs ON jobs.id = runs.job_id
+                    WHERE build_no != last_build
+            );
             DELETE FROM issues WHERE id IN (
                 SELECT issues.id FROM issues
                     JOIN runs ON runs.id = issues.run_id
@@ -489,6 +563,7 @@ impl Database {
             DELETE FROM runs;
             DELETE FROM issues;
             DELETE FROM tags;
+            DELETE FROM similarities;
             COMMIT;
             ",
         )

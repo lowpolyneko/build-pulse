@@ -154,16 +154,18 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
 }
 
 fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
+    // TODO: only parse when new builds exist
     let runs = db.lock().unwrap().get_all_runs()?;
 
-    let issues: Vec<_> = runs
+    let mut issues: Vec<_> = runs
         .par_iter()
         .filter_map(|r| db.lock().unwrap().get_issues(r).ok())
         .flatten()
         .filter(|(_, s)| !matches!(s, Severity::Metadata))
         .collect();
 
-    // iterate through all 2-combinations of issues
+    // iterate through all 2-combinations of issues sorted by id
+    issues.par_sort_by(|(i1, _), (i2, _)| i1.cmp(i2));
     issues
         .par_iter()
         .enumerate()
@@ -172,17 +174,19 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
                 .par_iter()
                 .map(|issue2| (&issue1.0, &issue2.0))
         })
-        .for_each(|(i1, i2)| {
+        .try_for_each(|(i1, i2)| {
             let ld = normalized_levenshtein_distance(i1.snippet, i2.snippet);
-            if ld > 0.8 {
+            if ld > 0.9 {
+                db.lock().unwrap().insert_similarity(i1, i2, ld)?;
+                db.lock().unwrap().insert_similarity(i2, i1, ld)?; // graph is symmetric
                 info!(
                     "Found match between issue '#{}' and '#{}'! Similarity = {}",
                     i1.id, i2.id, ld
                 );
             }
-        });
 
-    Ok(())
+            Ok(())
+        })
 }
 
 fn main() -> Result<()> {
