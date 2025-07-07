@@ -181,3 +181,149 @@ desc = "Intel OneAPI Build"
 pattern = '''intel(-oneapi)?'''
 from = "RunName"
 severity = "Metadata"
+
+### BUILD NODE TAGS
+### ----------------------------------------------------------------------
+[[tag]]
+name = "pmrs-freebsd64-240-01"
+desc = "pmrs-freebsd64-240-01 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-freebsd64-240-01.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-freebsd64-240-02"
+desc = "pmrs-freebsd64-240-02 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-freebsd64-240-02.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-gpu-240-01"
+desc = "prms-gpu-240-01 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-gpu-240-01.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-gpu-240-02"
+desc = "prms-gpu-240-02 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-gpu-240-02.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-linux-240-01"
+desc = "prms-linux-240-01 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-linux-240-01.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-linux-240-02"
+desc = "prms-linux-240-02 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-linux-240-02.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-linux-240-03"
+desc = "prms-linux-240-03 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-linux-240-03.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-linux-240-04"
+desc = "prms-linux-240-04 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-linux-240-04.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-linux-240-05"
+desc = "prms-linux-240-05 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-linux-240-05.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-linux-240-06"
+desc = "prms-linux-240-06 Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-linux-240-06.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "pmrs-macos-240-01.cels.anl.gov"
+desc = "prms-macos-240-01.cels.anl.gov Build Node"
+
+pattern = '''(?m)^Building remotely on pmrs-macos-240-01.cels.anl.gov.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "softiron-1"
+desc = "softiron-1 Build Node"
+
+pattern = '''(?m)^Building remotely on softiron-1.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "softiron-2"
+desc = "softiron-2 Build Node"
+
+pattern = '''(?m)^Building remotely on softiron-2.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "tiger"
+desc = "tiger Build Node"
+
+pattern = '''(?m)^Building remotely on tiger \(xpmem\).*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "tiger"
+desc = "tiger Build Node"
+
+pattern = '''(?m)^Building remotely on tiger.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "yuzu"
+desc = "yuzu Build Node"
+
+pattern = '''(?m)^Building remotely on yuzu \(xpmem\).*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "built-in"
+desc = "built-in Build Node"
+
+pattern = '''(?m)^Building remotely on built-in node.*$'''
+from = "Console"
+severity = "Metadata"
+
+[[tag]]
+name = "aws"
+desc = "aws Build Node"
+
+pattern = '''(?m)^Building remotely on aws.*$'''
+from = "Console"
+severity = "Metadata"
