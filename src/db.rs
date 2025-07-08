@@ -92,6 +92,9 @@ pub struct Statistics {
     /// Not built [Run]s
     pub not_built: u64,
 
+    /// [Run]s with unknown issues
+    pub unknown_issues: u64,
+
     /// Total [Issue]s found
     pub issues_found: u64,
 
@@ -459,6 +462,30 @@ impl Database {
 
                 stats
             });
+
+        // runs with unknown issues are runs
+        stats.unknown_issues = self
+            .conn
+            .prepare(
+                "
+                SELECT COUNT(*) FROM runs r
+                WHERE r.status = ?
+                    AND NOT EXISTS (
+                        SELECT 1 FROM issues
+                        JOIN tags ON tags.id = issues.tag_id
+                        WHERE
+                            issues.run_id = r.id
+                            AND tags.severity != ?
+                    )
+                ",
+            )?
+            .query_one(
+                (
+                    write_value!(Some(BuildStatus::Failure)),
+                    write_value!(Severity::Metadata),
+                ),
+                |row| row.get(0),
+            )?;
 
         // don't count metadata issues in total
         stats.issues_found = self

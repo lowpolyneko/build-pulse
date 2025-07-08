@@ -277,6 +277,11 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
             }
         }
 
+        b {
+            (stats.unknown_issues)
+            " runs with unknown issues!"
+        }
+
         h4 {
             "By Metadata"
         }
