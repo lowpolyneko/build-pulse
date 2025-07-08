@@ -2,7 +2,9 @@ pipeline {
     agent any
     stages {
         stage('prepare') {
-            copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted, exclude: 'build-pulse', optional: true
+            steps {
+                copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted, exclude: 'build-pulse', optional: true
+            }
         }
         stage('build') {
             agent {
@@ -21,7 +23,9 @@ pipeline {
             }
         }
         stage('package') {
-            archiveArtifacts artifacts: 'target/release/build-pulse,report.html,data.db,config.toml'
+            steps {
+                archiveArtifacts artifacts: 'target/release/build-pulse,report.html,data.db,config.toml'
+            }
         }
     }
 }
