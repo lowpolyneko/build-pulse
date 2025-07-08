@@ -1,18 +1,15 @@
 pipeline {
     agent any
+    environment {
+        PATH = '/nfs/gce/projects/pmrs/opt/cargo/bin:${env.PATH}'
+    }
     stages {
         stage('prepare') {
             steps {
-                copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted, exclude: 'build-pulse', optional: true
+                copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted, excludes: 'build-pulse', optional: true
             }
         }
         stage('build') {
-            agent {
-                docker {
-                    image 'rust:latest'
-                    reuseNode true
-                }
-            }
             steps {
                 sh 'cargo build --release'
             }
