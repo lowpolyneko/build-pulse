@@ -2,7 +2,7 @@
 use std::time::SystemTime;
 
 use jenkins_api::{build::BuildStatus, job::Job};
-use maud::{DOCTYPE, Markup, PreEscaped, html};
+use maud::{DOCTYPE, Markup, html};
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
@@ -134,7 +134,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         @for (i, s) in issues {
                             @if !matches!(s, Severity::Metadata) {
                                 pre {
-                                    (PreEscaped(i.snippet))
+                                    (i.snippet)
                                 }
                                 hr;
                             }
