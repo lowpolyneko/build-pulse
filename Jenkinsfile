@@ -6,7 +6,7 @@ pipeline {
     stages {
         stage('prepare') {
             steps {
-                copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted, excludes: 'build-pulse', optional: true
+                copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted(), excludes: 'build-pulse', optional: true
             }
         }
         stage('build') {
