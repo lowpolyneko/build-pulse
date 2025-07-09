@@ -73,6 +73,9 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
                 }
             }
             details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
+                summary {
+                    "Run Information"
+                }
                 table style="border: 1px solid black;" {
                     @if let Some(runs) = sorted_runs {
                         @for run in runs {
@@ -310,8 +313,11 @@ pub fn render(project: &SparseMatrixProject, db: &Database, tz: UtcOffset) -> Ma
     let time: OffsetDateTime = SystemTime::now().into();
     html! {
         (DOCTYPE)
-        html {
+        html lang="en" {
             head {
+                title {
+                    "build-pulse report"
+                }
                 meta charset="utf-8";
             }
             body {
