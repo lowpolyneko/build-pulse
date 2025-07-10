@@ -62,7 +62,11 @@ fn pull_build_logs(
                 |build| Some((job, build)),
             )
         })
-        .flat_map(|(job, build)| build.runs.par_iter().map(move |mb| (job, build, mb)))
+        .filter_map(|(job, build)| match build.runs.as_ref() {
+            Some(r) => Some(r.par_iter().map(move |mb| (job, build, mb))),
+            None => None,
+        })
+        .flatten()
         .filter(|(_, build, mb)| mb.number == build.number) // filter out runs w/o matching build
         .map(|(job, build, mb)| {
             Ok((

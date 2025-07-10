@@ -51,7 +51,7 @@ pub struct SparseBuild {
     pub result: Option<BuildStatus>,
 
     /// Build runs as a [Vec] of [ShortBuild]s
-    pub runs: Vec<ShortBuild>,
+    pub runs: Option<Vec<ShortBuild>>,
 }
 
 /// Builds that can be represented as [Run]

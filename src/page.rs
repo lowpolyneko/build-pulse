@@ -25,24 +25,30 @@ where
 
 /// Render a [SparseJob]
 fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
-    let sorted_runs = job.last_build.as_ref().map(|j| {
-        let mut runs = j
-            .runs
-            .iter()
-            .filter(|r| r.number == j.number)
-            .map(|r| db.get_run(&r.url).expect("Expecting valid run here..."))
-            .collect::<Vec<_>>();
-        runs.sort_by_key(|r| match r.status {
-            Some(BuildStatus::Failure) => 0,
-            Some(BuildStatus::Unstable) => 1,
-            Some(BuildStatus::Success) => 2,
-            Some(BuildStatus::NotBuilt) => 3,
-            Some(BuildStatus::Aborted) => 4,
-            None => 4,
-        });
+    let sorted_runs = match job.last_build.as_ref() {
+        Some(b) => match b.runs.as_ref() {
+            Some(runs) => {
+                let mut sr = runs
+                    .iter()
+                    .filter(|r| r.number == b.number)
+                    .map(|r| db.get_run(&r.url).expect("Expecting valid run here..."))
+                    .collect::<Vec<_>>();
 
-        runs
-    });
+                sr.sort_by_key(|r| match r.status {
+                    Some(BuildStatus::Failure) => 0,
+                    Some(BuildStatus::Unstable) => 1,
+                    Some(BuildStatus::Success) => 2,
+                    Some(BuildStatus::NotBuilt) => 3,
+                    Some(BuildStatus::Aborted) => 4,
+                    None => 4,
+                });
+
+                Some(sr)
+            }
+            None => None,
+        },
+        None => None,
+    };
 
     html! {
         h2 {
