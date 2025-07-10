@@ -1,5 +1,9 @@
 //! A Jenkins CI/CD-based build analyzer and issue prioritizer.
-use std::{fs, sync::Mutex};
+use std::{
+    fs,
+    hash::{DefaultHasher, Hash, Hasher},
+    sync::Mutex,
+};
 
 use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
@@ -12,7 +16,7 @@ use time::UtcOffset;
 use crate::{
     api::{AsJob, AsRun, SparseMatrixProject},
     config::{Config, Field, Severity},
-    db::{Database, InDatabase},
+    db::{Database, InDatabase, Issue},
     parse::{Tag, TagSet, normalized_levenshtein_distance},
 };
 
@@ -157,33 +161,43 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
     // TODO: only parse when new builds exist
     let runs = db.lock().unwrap().get_all_runs()?;
 
-    let mut issues: Vec<_> = runs
-        .par_iter()
+    // conservatively group by levenshtein distance
+    let mut groups: Vec<Vec<InDatabase<Issue>>> = Vec::new();
+    runs.iter()
         .filter_map(|r| db.lock().unwrap().get_issues(r).ok())
         .flatten()
-        .filter(|(_, s)| !matches!(s, Severity::Metadata))
-        .collect();
-
-    // iterate through all 2-combinations of issues sorted by id
-    issues.par_sort_by(|(i1, _), (i2, _)| i1.cmp(i2));
-    issues
-        .par_iter()
-        .enumerate()
-        .flat_map(|(i, issue1)| {
-            issues[i + 1..]
-                .par_iter()
-                .map(|issue2| (&issue1.0, &issue2.0))
+        .filter_map(|(i, s)| match s {
+            Severity::Metadata => None,
+            _ => Some(i),
         })
-        .try_for_each(|(i1, i2)| {
-            let ld = normalized_levenshtein_distance(i1.snippet, i2.snippet);
-            if ld > 0.9 {
-                db.lock().unwrap().insert_similarity(i1, i2, ld)?;
-                db.lock().unwrap().insert_similarity(i2, i1, ld)?; // graph is symmetric
-                info!(
-                    "Found match between issue '#{}' and '#{}'! Similarity = {}",
-                    i1.id, i2.id, ld
-                );
+        .for_each(|i| {
+            match groups.par_iter_mut().find_any(|g| {
+                g.par_iter()
+                    .all(|i2| normalized_levenshtein_distance(i.snippet, i2.snippet) > 0.9)
+            }) {
+                Some(g) => g.push(i),
+                None => groups.push(vec![i]),
             }
+        });
+
+    // sort resultant groups
+    groups.par_iter_mut().for_each(|g| g.par_sort());
+    groups.par_sort();
+
+    // store relations in database
+    groups
+        .par_iter()
+        .flat_map(|g| {
+            let mut hasher = DefaultHasher::new();
+            g.hash(&mut hasher);
+            g.par_iter().map(move |i| (hasher.finish(), i))
+        })
+        .try_for_each(|(hash, i)| {
+            db.lock().unwrap().insert_similarity(hash, i)?;
+            info!(
+                "Issue '#{}' likely matches with similarity group '#{}'!",
+                i.id, hash
+            );
 
             Ok(())
         })

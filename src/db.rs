@@ -1,5 +1,8 @@
 //! [rusqlite] based ORM to cache build results.
-use std::ops::{Deref, DerefMut};
+use std::{
+    hash::Hash,
+    ops::{Deref, DerefMut},
+};
 
 use jenkins_api::build::BuildStatus;
 use rusqlite::{Connection, Error, Result};
@@ -66,6 +69,7 @@ pub struct Run {
 }
 
 /// [Issue] stored in [Database]
+#[derive(Hash)]
 pub struct Issue<'a> {
     /// String snippet from [Run]
     pub snippet: &'a str,
@@ -103,6 +107,7 @@ pub struct Statistics {
 }
 
 /// Represents an item `T` in [Database]
+#[derive(Hash)]
 pub struct InDatabase<T> {
     /// Row ID of `item`
     pub id: i64,
@@ -205,16 +210,11 @@ impl Database {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS similarities (
                 id              INTEGER PRIMARY KEY,
-                issue_a_id      INTEGER NOT NULL,
-                issue_b_id      INTEGER NOT NULL,
-                similarity      REAL NOT NULL,
-                FOREIGN KEY(issue_a_id)
-                    REFERENCES issues(id),
-                FOREIGN KEY(issue_b_id)
+                similarity_hash INTEGER NOT NULL,
+                issue_id        INTEGER NOT NULL,
+                FOREIGN KEY(issue_id)
                     REFERENCES issues(id)
             ) STRICT;
-            CREATE UNIQUE INDEX IF NOT EXISTS relation
-                ON similarities (issue_a_id, issue_b_id);
             COMMIT;
             ",
         )?;
@@ -282,17 +282,16 @@ impl Database {
     /// Insert an [Issue] similarity into [Database]
     pub fn insert_similarity(
         &self,
-        issue_a: &InDatabase<Issue>,
-        issue_b: &InDatabase<Issue>,
-        similarity: f32,
+        similarity_hash: u64,
+        issue_id: &InDatabase<Issue>,
     ) -> Result<i64> {
         self.conn
             .prepare_cached(
                 "
-                INSERT OR IGNORE INTO similarities (issue_a_id, issue_b_id, similarity) VALUES (?, ?, ?)
+                INSERT OR IGNORE INTO similarities (similarity_hash, issue_id) VALUES (?, ?)
                 ",
             )?
-            .execute((issue_a.id, issue_b.id, similarity))?;
+            .execute((similarity_hash.cast_signed(), issue_id.id))?;
 
         Ok(self.conn.last_insert_rowid())
     }
@@ -518,10 +517,9 @@ impl Database {
         // delete similarities first
         tx.execute(
             "
-            DELETE FROM similarities WHERE id IN (
-                SELECT similarities.id FROM similarities
-                    JOIN issues ON issues.id = similarities.issue_a_id
-                        OR issues.id = similarities.issue_b_id
+            DELETE FROM similarities WHERE similarity_hash IN (
+                SELECT DISTINCT similarities.similarity_hash FROM similarities
+                    JOIN issues ON issues.id = similarities.issue_id
                     JOIN runs ON runs.id = issues.run_id
                     WHERE runs.tag_schema = ?
             )
@@ -547,10 +545,9 @@ impl Database {
         self.conn.execute_batch(
             "
             BEGIN;
-            DELETE FROM similarities WHERE id IN (
-                SELECT similarities.id FROM similarities
-                    JOIN issues ON issues.id = similarities.issue_a_id
-                        OR issues.id = similarities.issue_b_id
+            DELETE FROM similarities WHERE similarity_hash IN (
+                SELECT DISTINCT similarities.similarity_hash FROM similarities
+                    JOIN issues ON issues.id = similarities.issue_id
                     JOIN runs ON runs.id = issues.run_id
                     JOIN jobs ON jobs.id = runs.job_id
                     WHERE build_no != last_build
