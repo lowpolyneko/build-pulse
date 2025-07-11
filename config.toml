@@ -12,15 +12,67 @@ database = "data.db"
 ### ----------------------------------------------------------------------
 [[tag]]
 name = "cc_emit"
-desc = "CC Compiler Warning"
+desc = "CC Compiler Error"
 
 # Matches messages of the following
 # <filepath>:<lineno>:<linecol?>: error: <message>\n
 #  <indented followups>\n
 # https://www.gnu.org/prep/standards/html_node/Errors.html
-pattern = '''(?m)^[a-zA-Z0-9_\-\./ ]+([\.\-:][0-9]+){0,4}: error: .*(\n\s+.*)*(\n[a-zA-Z0-9_\-\./ ]+([\.\-:][0-9]+){0,4}: [a-z]+: .*(\n\s+.*)*)*$'''
+pattern = '''(?m)^[a-zA-Z0-9_\-\./ ]+([\.\-:][0-9]+){0,4}: (fatal )?error: .*(\n\s+.*)*(\n[a-zA-Z0-9_\-\./ ]+([\.\-:][0-9]+){0,4}: [a-z]+: .*(\n\s+.*)*)*$'''
 from = "Console"
 severity = "Error"
+
+[[tag]]
+name = "nvcxx_emit"
+desc = "NVC++ Compiler Error"
+
+# Matches messages of the following
+# "<filepath>", line <lineno>: error: <message>\n
+#  <indented followups>\n
+pattern = '''(?m)^"[a-zA-Z0-9_\-\./ ]+", line [0-9]+: (fatal )?error: .*(\n\s+.*)*(\n"[a-zA-Z0-9_\-\./ ]+", line [0-9]+: [a-z]+: .*(\n\s+.*)*)*$'''
+from = "Console"
+severity = "Error"
+
+[[tag]]
+name = "nvcxx_bail"
+desc = "NVC++ Internal Compiler Error"
+
+# Matches messages of the following example
+# NVC++-F-0000-Internal compiler error. add_cilis(): bad jmp code    1088  (src/mpi/coll/op/op_fns.c: 105)
+# NVC++/x86-64 Linux 22.3-0: compilation aborted
+pattern = '''(?m)^NV.*Internal compiler error. .*$'''
+from = "Console"
+severity = "Error"
+
+# [[tag]]
+# name = "cmd_not_found"
+# desc = "command not found"
+#
+# # Matches messages of the following
+# # (<file><lineno>: )?<binary>: command not found
+# pattern = '''(?m)^([a-zA-Z0-9_\-\./ ]+(: line [0-9]+)?: )?[a-zA-Z0-9_\-\./ ]+: command not found$'''
+# from = "Console"
+# severity = "Info"
+
+[[tag]]
+name = "out_of_space"
+desc = "No space left on device"
+
+# Matches messages of the following
+# (<file><lineno>: )?<binary>: command not found
+pattern = '''(?m)^[a-zA-Z0-9_\-\./ ]+(: .*)?: No space left on device$'''
+from = "Console"
+severity = "Warning"
+
+# [[tag]]
+# name = "no_such_file_or_dir"
+# desc = "No such file or directory"
+#
+# # Matches messages of the following
+# # (<file><lineno>: )?<binary>: command not found
+# pattern = '''(?m)^[a-zA-Z0-9_\-\./ ]+(: .*)?: No such file or directory$'''
+# from = "Console"
+# severity = "Info"
 
 [[tag]]
 name = "configure_error"
@@ -75,7 +127,7 @@ desc = "Java Exception Stack Trace"
 # 	at hudson.remoting.SynchronousCommandTransport$ReaderThread.run(SynchronousCommandTransport.java:90)
 pattern = '''(?m)^([a-zA-Z]+: .*\n([a-z]+\.)+[a-zA-Z]+(\n\s+.*)*)+$'''
 from = "Console"
-severity = "Warning"
+severity = "Info"
 
 [[tag]]
 name = "mpi_abort"
@@ -100,7 +152,7 @@ desc = "Python Exception Traceback"
 # https://stackoverflow.com/questions/53658695/how-to-match-the-whole-traceback-message-and-not-stop-early-using-regex
 pattern = '''(?m)^Traceback \(most recent call last\):(?:\n.*)+?\n(.*?(?:Exception|Error):)\s*(.+)$'''
 from = "Console"
-severity = "Error"
+severity = "Warning"
 
 [[tag]]
 name = "ld_error"
@@ -179,6 +231,48 @@ name = "intel"
 desc = "Intel OneAPI Build"
 
 pattern = '''intel(-oneapi)?'''
+from = "RunName"
+severity = "Metadata"
+
+[[tag]]
+name = "nvidia"
+desc = "NVC++ Build"
+
+pattern = '''nvidia'''
+from = "RunName"
+severity = "Metadata"
+
+### NETMOD OPTION TAGS
+### ----------------------------------------------------------------------
+[[tag]]
+name = "ch3-tcp"
+desc = "netmod=ch3-tcp"
+
+pattern = '''ch3(-nemesis)?-tcp'''
+from = "RunName"
+severity = "Metadata"
+
+[[tag]]
+name = "ch3-sock"
+desc = "netmod=ch3-sock"
+
+pattern = '''ch3-sock'''
+from = "RunName"
+severity = "Metadata"
+
+[[tag]]
+name = "ch4-ofi"
+desc = "netmod=ch4-ofi"
+
+pattern = '''(ch4-)?ofi(-(global)|(vci)|(sepctx)|(domain))?'''
+from = "RunName"
+severity = "Metadata"
+
+[[tag]]
+name = "ch4-ucx"
+desc = "netmod=ch4-ucx"
+
+pattern = '''(ch4-)?ucx(-(global)|(vci))?'''
 from = "RunName"
 severity = "Metadata"
 
@@ -327,3 +421,61 @@ desc = "aws Build Node"
 pattern = '''(?m)^Building remotely on aws.*$'''
 from = "Console"
 severity = "Metadata"
+
+# MPICH SPECIFIC: currently untracked tags
+# shmem
+# debug
+# pgi
+# multithread
+# infiniband
+# noerrorchecking
+# yaksa
+# hydra
+# gforker
+# default
+# singularity
+# nofast
+# vci
+# external
+# global_lock
+# absoft
+# asan
+# fast
+# polaris-ci
+# tcp
+# singlethread
+# multi-vci
+# gpu
+# sockets
+# debuginfo
+# noweak
+# pmix
+# async
+# noshared
+# pervci_async
+# psm3
+# strictnoweak
+# sock
+# pmi1
+# xpmem
+# verbs
+# integer-8
+# nocxx
+# async-ticketlock
+# multvci_domain
+# nag
+# strict
+# ubsan
+# multvci_sepctx
+# single-vci
+# gpu_new
+# master
+# nccl
+# global_async
+# am-only
+# jenkins_arch
+# pmi2
+# prterun
+# nofortran
+# pervci_lock
+# solstudio
