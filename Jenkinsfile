@@ -1,5 +1,8 @@
 pipeline {
     agent any
+    parameters {
+        booleanParam name: 'REUSE_DB', defaultValue: true, description: 'Whether or not to reuse the last `data.db`'
+    }
     environment {
         PMRS_OPT = '/nfs/gce/projects/pmrs/opt'
         RUSTUP_HOME = "${PMRS_OPT}/rustup"
@@ -8,6 +11,9 @@ pipeline {
     }
     stages {
         stage('prepare') {
+            when {
+                expression { return params.REUSE_DB }
+            }
             steps {
                 echo 'Copying cached database...'
                 copyArtifacts projectName: currentBuild.fullProjectName, selector: lastCompleted(), filter: 'data.db', optional: true
