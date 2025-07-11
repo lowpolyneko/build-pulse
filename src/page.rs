@@ -78,12 +78,12 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
                     }
                 }
             }
-            details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
-                summary {
-                    "Run Information"
-                }
-                table style="border: 1px solid black;" {
-                    @if let Some(runs) = sorted_runs {
+            @if let Some(runs) = sorted_runs {
+                details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
+                    summary {
+                        "Run Information"
+                    }
+                    table style="border: 1px solid black;" {
                         @for run in runs {
                             (render_run(&run, &db))
                         }
