@@ -107,7 +107,6 @@ pub struct Statistics {
 }
 
 /// Represents an item `T` in [Database]
-#[derive(Hash)]
 pub struct InDatabase<T> {
     /// Row ID of `item`
     pub id: i64,
@@ -120,6 +119,13 @@ impl<T> InDatabase<T> {
     /// Wrap item in [InDatabase] with new `id` from [Database]
     fn new(id: i64, item: T) -> Self {
         InDatabase { id, item }
+    }
+}
+
+// Hash only considers the id property
+impl<T> Hash for InDatabase<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }
 

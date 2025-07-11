@@ -62,9 +62,11 @@ fn pull_build_logs(
                 |build| Some((job, build)),
             )
         })
-        .filter_map(|(job, build)| match build.runs.as_ref() {
-            Some(r) => Some(r.par_iter().map(move |mb| (job, build, mb))),
-            None => None,
+        .filter_map(|(job, build)| {
+            build
+                .runs
+                .as_ref()
+                .map(|r| r.par_iter().map(move |mb| (job, build, mb)))
         })
         .flatten()
         .filter(|(_, build, mb)| mb.number == build.number) // filter out runs w/o matching build
@@ -161,6 +163,7 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
     Ok(())
 }
 
+/// Calculate similarities against all issues and soft insert the groupings into [Database]
 fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
     // TODO: only parse when new builds exist
     let runs = db.lock().unwrap().get_all_runs()?;
