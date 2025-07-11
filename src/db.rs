@@ -725,11 +725,11 @@ impl Database {
         self.conn.execute_batch(
             "
             BEGIN;
-            DELETE FROM jobs;
-            DELETE FROM runs;
-            DELETE FROM issues;
-            DELETE FROM tags;
             DELETE FROM similarities;
+            DELETE FROM issues;
+            DELETE FROM runs;
+            DELETE FROM jobs;
+            DELETE FROM tags;
             COMMIT;
             ",
         )
