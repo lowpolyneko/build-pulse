@@ -133,9 +133,8 @@ where
             build_no: self.number(),
             status,
             log: match status {
-                Some(BuildStatus::Failure | BuildStatus::Unstable) =>
-                // only get log on failure
-                {
+                Some(BuildStatus::Failure | BuildStatus::Unstable) => {
+                    // only get log on failure
                     self.get_console(jenkins_client)
                         .map_err(|e| {
                             log::error!("Failed to retrieve build log for run {display_name}: {e}")

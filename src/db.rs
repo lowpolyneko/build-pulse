@@ -630,8 +630,8 @@ impl Database {
     /// Check whether or not there are untagged runs
     pub fn has_untagged_runs(&self) -> Result<bool> {
         self.conn
-            .prepare_cached("SELECT 1 FROM runs WHERE tag_schema = ?")?
-            .exists((write_value!(Option::<u64>::None),))
+            .prepare_cached("SELECT 1 FROM runs WHERE tag_schema IS NULL")?
+            .exists(())
     }
 
     /// Update the [TagSet] schema for all [Run]s in [Database]

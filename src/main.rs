@@ -165,7 +165,6 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
 fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
-    // TODO: only parse when new builds exist
     let runs = db.lock().unwrap().get_all_runs()?;
 
     // conservatively group by levenshtein distance
@@ -268,7 +267,6 @@ fn main() -> Result<()> {
 
     if database.get_mut().unwrap().has_untagged_runs()? {
         info!("Parsing unprocessed run logs...");
-
         parse_unprocessed_runs(&tags, &database)?;
 
         info!("Done!");
