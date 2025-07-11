@@ -22,6 +22,13 @@ macro_rules! read_value {
         })?
     };
 }
+macro_rules! try_read_value {
+    ($row:ident, $idx:literal) => {
+        from_value($row.get($idx)?).map_err(|e| {
+            Error::FromSqlConversionFailure($idx, rusqlite::types::Type::Text, e.into())
+        })
+    };
+}
 
 /// Write as [serde] serializable value
 macro_rules! write_value {
@@ -510,11 +517,7 @@ impl Database {
     pub fn get_tag_field(&self, id: i64) -> Result<Field> {
         self.conn
             .prepare_cached("SELECT field FROM tags WHERE tags.id = ?")?
-            .query_one((id,), |row| {
-                from_value(row.get(0)?).map_err(|e| {
-                    Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
-                })
-            })
+            .query_one((id,), |row| try_read_value!(row, 0))
     }
 
     /// Get all similarities by [Tag] in [Database]
@@ -554,15 +557,8 @@ impl Database {
         // calculate success/failures for all runs
         let mut stats = self
             .conn
-            .prepare("SELECT status,COUNT(*) FROM runs GROUP BY status")?
-            .query_map((), |row| {
-                Ok((
-                    from_value::<Option<BuildStatus>>(row.get(0)?).map_err(|e| {
-                        Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
-                    })?,
-                    row.get::<_, u64>(1)?,
-                ))
-            })?
+            .prepare("SELECT status, COUNT(*) FROM runs GROUP BY status")?
+            .query_map((), |row| Ok((read_value!(row, 0), row.get::<_, u64>(1)?)))?
             .collect::<Result<Vec<_>>>()?
             .iter()
             .fold(Statistics::default(), |mut stats, (status, count)| {
@@ -629,6 +625,13 @@ impl Database {
             .collect::<Result<Vec<_>>>()?;
 
         Ok(stats)
+    }
+
+    /// Check whether or not there are untagged runs
+    pub fn has_untagged_runs(&self) -> Result<bool> {
+        self.conn
+            .prepare_cached("SELECT 1 FROM runs WHERE tag_schema = ?")?
+            .exists((write_value!(Option::<u64>::None),))
     }
 
     /// Update the [TagSet] schema for all [Run]s in [Database]

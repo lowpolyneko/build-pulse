@@ -260,27 +260,32 @@ fn main() -> Result<()> {
 
     let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
-    let database = Mutex::new(database);
+    let mut database = Mutex::new(database);
     pull_build_logs(&project, &jenkins, &database)?;
 
     info!("Done!");
     info!("----------------------------------------");
-    info!("Parsing unprocessed run logs...");
 
-    parse_unprocessed_runs(&tags, &database)?;
+    if database.get_mut().unwrap().has_untagged_runs()? {
+        info!("Parsing unprocessed run logs...");
 
-    info!("Done!");
-    info!("----------------------------------------");
+        parse_unprocessed_runs(&tags, &database)?;
 
-    // purge old data
-    info!("Purging old runs...");
-    database.lock().unwrap().purge_old_runs()?;
+        info!("Done!");
+        info!("----------------------------------------");
 
-    info!("Purging extraneous tags...");
-    database.lock().unwrap().purge_orphan_tags()?;
+        // purge old data
+        info!("Purging old runs...");
+        database.get_mut().unwrap().purge_old_runs()?;
 
-    info!("Calculating issue similarities...");
-    calculate_similarities(&database)?;
+        info!("Purging extraneous tags...");
+        database.get_mut().unwrap().purge_orphan_tags()?;
+
+        info!("Calculating issue similarities...");
+        calculate_similarities(&database)?;
+    } else {
+        info!("No runs to process.");
+    }
 
     info!("Done!");
     info!("----------------------------------------");
