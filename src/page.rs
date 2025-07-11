@@ -142,6 +142,12 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         hr;
                         @for (i, s) in issues {
                             @if !matches!(s, Severity::Metadata) {
+                                @if i.duplicates > 0 {
+                                    b {
+                                        (i.duplicates)
+                                        " duplicate emit(s)"
+                                    }
+                                }
                                 pre {
                                     (i.snippet)
                                 }

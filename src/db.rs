@@ -70,13 +70,16 @@ pub struct Run {
 }
 
 /// [Issue] stored in [Database]
-#[derive(Hash)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Issue<'a> {
     /// String snippet from [Run]
     pub snippet: &'a str,
 
     /// [Tag] associated with [Issue]
     pub tag: i64,
+
+    /// Number of duplicate emits in the same [Run]
+    pub duplicates: u64,
 }
 
 /// Statistics of [Issue]s and [Run]s in [Database]
@@ -123,7 +126,7 @@ impl<T> InDatabase<T> {
     }
 }
 
-// Hash only considers the id property
+// Hash only considers the id property for [InDatabase]
 impl<T> Hash for InDatabase<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
@@ -202,6 +205,7 @@ impl Database {
                 snippet_end     INTEGER NOT NULL,
                 run_id          INTEGER NOT NULL,
                 tag_id          INTEGER NOT NULL,
+                duplicates      INTEGER NOT NULL,
                 FOREIGN KEY(run_id)
                     REFERENCES runs(id),
                 FOREIGN KEY(tag_id)
@@ -247,19 +251,29 @@ impl Database {
 
     /// Insert a [Run] into [Database]
     pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
-        self.conn.prepare_cached(
-            "INSERT INTO runs (build_url, display_name, build_no, status, log, tag_schema, job_id) VALUES (?, ?, ?, ?, ?, ?, ?)")?
-            .execute(
-                (
-                    &run.build_url,
-                    &run.display_name,
-                    run.build_no,
-                    write_value!(run.status),
-                    &run.log,
-                    run.tag_schema.map(u64::cast_signed),
-                    run.job,
-                ),
-            )?;
+        self.conn
+            .prepare_cached(
+                "
+                INSERT INTO runs (
+                    build_url,
+                    display_name,
+                    build_no,
+                    status,
+                    log,
+                    tag_schema,
+                    job_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ",
+            )?
+            .execute((
+                &run.build_url,
+                &run.display_name,
+                run.build_no,
+                write_value!(run.status),
+                &run.log,
+                run.tag_schema.map(u64::cast_signed),
+                run.job,
+            ))?;
         Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
     }
 
@@ -279,9 +293,25 @@ impl Database {
                 .as_ptr(),
             );
             let end = start + issue.snippet.len();
-            self.conn.prepare_cached(
-                "INSERT INTO issues (snippet_start, snippet_end, run_id, tag_id) VALUES (?, ?, ?, ?)")?
-                .execute((start, end, run.id, issue.tag))?;
+            self.conn
+                .prepare_cached(
+                    "
+                    INSERT INTO issues (
+                        snippet_start,
+                        snippet_end,
+                        run_id,
+                        tag_id,
+                        duplicates
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ",
+                )?
+                .execute((
+                    start,
+                    end,
+                    run.id,
+                    issue.tag,
+                    issue.duplicates.cast_signed(),
+                ))?;
         }
         Ok(InDatabase::new(self.conn.last_insert_rowid(), issue))
     }
@@ -295,7 +325,10 @@ impl Database {
         self.conn
             .prepare_cached(
                 "
-                INSERT OR IGNORE INTO similarities (similarity_hash, issue_id) VALUES (?, ?)
+                INSERT OR IGNORE INTO similarities (
+                    similarity_hash,
+                    issue_id
+                ) VALUES (?, ?)
                 ",
             )?
             .execute((similarity_hash.cast_signed(), issue_id.id))?;
@@ -344,30 +377,53 @@ impl Database {
 
     /// Get a [Run] from [Database]
     pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
-        self.conn.prepare_cached(
-            "SELECT id, build_url, display_name, build_no, status, log, tag_schema, job_id FROM runs WHERE build_url = ?")?
+        self.conn
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    build_url,
+                    display_name,
+                    build_no,
+                    status,
+                    log,
+                    tag_schema,
+                    job_id
+                FROM runs WHERE build_url = ?
+                ",
+            )?
             .query_one((build_url,), |row| {
-                    Ok(InDatabase::new(
-                        row.get(0)?,
-                        Run {
-                            build_url: row.get(1)?,
-                            display_name: row.get(2)?,
-                            build_no: row.get(3)?,
-                            status: read_value!(row, 4),
-                            log: row.get(5)?,
-                            tag_schema: row.get::<_, Option<i64>>(6)?.map(i64::cast_unsigned),
-                            job: row.get(7)?,
-                        },
-                    ))
-                },
-            )
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Run {
+                        build_url: row.get(1)?,
+                        display_name: row.get(2)?,
+                        build_no: row.get(3)?,
+                        status: read_value!(row, 4),
+                        log: row.get(5)?,
+                        tag_schema: row.get::<_, Option<i64>>(6)?.map(i64::cast_unsigned),
+                        job: row.get(7)?,
+                    },
+                ))
+            })
     }
 
     /// Get all [Run]s from [Database]
     pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
         self.conn
             .prepare_cached(
-                "SELECT id, build_url, display_name, build_no, status, log, tag_schema, job_id FROM runs",
+                "
+                SELECT
+                    id,
+                    build_url,
+                    display_name,
+                    build_no,
+                    status,
+                    log,
+                    tag_schema,
+                    job_id
+                FROM runs
+                ",
             )?
             .query_map((), |row| {
                 Ok(InDatabase::new(
@@ -392,22 +448,39 @@ impl Database {
         run: &'a InDatabase<Run>,
     ) -> Result<Vec<(InDatabase<Issue<'a>>, Severity)>> {
         self.conn
-            .prepare_cached("SELECT issues.id, snippet_start, snippet_end, run_id, tag_id, field, severity FROM issues JOIN tags ON tags.id = issues.tag_id WHERE issues.run_id = ?")?
+            .prepare_cached(
+                "
+                SELECT
+                    issues.id,
+                    snippet_start,
+                    snippet_end,
+                    tag_id,
+                    duplicates,
+                    field,
+                    severity
+                FROM issues
+                JOIN tags ON tags.id = issues.tag_id
+                WHERE issues.run_id = ?
+                ",
+            )?
             .query_map((run.id,), |row| {
-                Ok((InDatabase::new(
-                    row.get(0)?,
-                    Issue {
-                        snippet: &match read_value!(row, 5) {
+                Ok((
+                    InDatabase::new(
+                        row.get(0)?,
+                        Issue {
+                            snippet: &match read_value!(row, 5) {
                                 Field::Console => run
-                                                    .log
-                                                    .as_ref()
-                                                    .expect("Issue references non-existent log!"),
+                                    .log
+                                    .as_ref()
+                                    .expect("Issue references non-existent log!"),
                                 Field::RunName => &run.display_name,
-                            }
-                            [row.get(1)?..row.get(2)?],
-                        tag: row.get(4)?,
-                    }
-                ), read_value!(row, 6)))
+                            }[row.get(1)?..row.get(2)?],
+                            tag: row.get(3)?,
+                            duplicates: row.get(4).map(i64::cast_unsigned)?,
+                        },
+                    ),
+                    read_value!(row, 6),
+                ))
             })?
             .collect()
     }
@@ -416,7 +489,11 @@ impl Database {
     pub fn get_tags(&self, run: &InDatabase<Run>) -> Result<Vec<(String, String)>> {
         self.conn
             .prepare_cached(
-                "SELECT DISTINCT name, desc FROM tags JOIN issues ON issues.tag_id = tags.id WHERE issues.run_id = ?",
+                "
+                SELECT DISTINCT name, desc FROM tags
+                JOIN issues ON issues.tag_id = tags.id
+                WHERE issues.run_id = ?
+                ",
             )?
             .query_map((run.id,), |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect()
@@ -445,10 +522,12 @@ impl Database {
         let mut hm: HashMap<u64, (String, String, Vec<String>)> = HashMap::new();
         self.conn
             .prepare_cached(
-                "SELECT DISTINCT similarity_hash, name, desc, display_name FROM similarities
+                "
+                SELECT DISTINCT similarity_hash, name, desc, display_name FROM similarities
                 JOIN issues ON issues.id = similarities.issue_id
                 JOIN tags ON tags.id = issues.tag_id
-                JOIN runs ON runs.id = issues.run_id",
+                JOIN runs ON runs.id = issues.run_id
+                ",
             )?
             .query_map((), |row| {
                 Ok((
@@ -526,13 +605,27 @@ impl Database {
         // don't count metadata issues in total
         stats.issues_found = self
             .conn
-            .prepare("SELECT COUNT(*) FROM issues JOIN tags ON tags.id = issues.tag_id WHERE tags.severity != ?")?
+            .prepare(
+                "
+                SELECT COUNT(*) FROM issues
+                JOIN tags ON tags.id = issues.tag_id
+                WHERE tags.severity != ?
+                ",
+            )?
             .query_one((write_value!(Severity::Metadata),), |row| row.get(0))?;
 
         stats.tag_counts = self
             .conn
-            .prepare("SELECT name, desc, severity, COUNT(*) FROM issues JOIN tags ON tags.id = issues.tag_id GROUP BY issues.tag_id")?
-            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, read_value!(row, 2), row.get(3)?)))?
+            .prepare(
+                "
+                SELECT name, desc, severity, COUNT(*) FROM issues
+                JOIN tags ON tags.id = issues.tag_id
+                GROUP BY issues.tag_id
+                ",
+            )?
+            .query_map((), |row| {
+                Ok((row.get(0)?, row.get(1)?, read_value!(row, 2), row.get(3)?))
+            })?
             .collect::<Result<Vec<_>>>()?;
 
         Ok(stats)
@@ -566,7 +659,13 @@ impl Database {
 
         // then issues
         tx.execute(
-            "DELETE FROM issues WHERE id IN (SELECT i.id FROM issues i INNER JOIN runs r ON i.run_id = r.id WHERE r.tag_schema != ?)",
+            "
+            DELETE FROM issues WHERE id IN (
+                SELECT i.id FROM issues i
+                INNER JOIN runs r ON i.run_id = r.id
+                WHERE r.tag_schema != ?
+            )
+            ",
             (current_schema.cast_signed(),),
         )?;
 
@@ -609,7 +708,10 @@ impl Database {
     pub fn purge_orphan_tags(&self) -> Result<usize> {
         self.conn.execute(
             "
-            DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM issues WHERE tags.id = issues.tag_id)
+            DELETE FROM tags WHERE NOT EXISTS (
+                SELECT 1 FROM issues
+                WHERE tags.id = issues.tag_id
+            )
             ",
             (),
         )

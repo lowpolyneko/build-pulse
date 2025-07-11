@@ -1,5 +1,6 @@
 //! [Tag] and [TagSet] parsing behavior.
 use std::{
+    collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
     ops::Deref,
 };
@@ -128,9 +129,21 @@ impl<T> TagSet<T> {
 impl<'a> InDatabase<Tag<'a>> {
     /// Grep `field` for [Issue]s
     pub fn grep_issue(&'a self, field: &'a str) -> impl Iterator<Item = Issue<'a>> {
-        self.regex.find_iter(field).map(|m| Issue {
-            snippet: m.as_str(),
-            tag: self.id,
+        let mut hm: HashMap<Issue, u64> = HashMap::new();
+        self.regex
+            .find_iter(field)
+            .map(|m| Issue {
+                snippet: m.as_str(),
+                tag: self.id,
+                duplicates: 0,
+            })
+            .for_each(|i| {
+                hm.entry(i).and_modify(|e| *e += 1).or_insert(0);
+            });
+
+        hm.into_iter().map(|(mut i, d)| {
+            i.duplicates = d;
+            i
         })
     }
 }
