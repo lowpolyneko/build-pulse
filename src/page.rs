@@ -331,10 +331,11 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
                         }
                     }
                     td style="border: 1px solid black;" {
-                        p {
+                        ul {
                             @for display_name in group {
-                                (display_name)
-                                br;
+                                li {
+                                    (display_name)
+                                }
                             }
                         }
                     }

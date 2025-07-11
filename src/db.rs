@@ -654,7 +654,7 @@ impl Database {
                 SELECT DISTINCT similarities.similarity_hash FROM similarities
                     JOIN issues ON issues.id = similarities.issue_id
                     JOIN runs ON runs.id = issues.run_id
-                    WHERE runs.tag_schema = ?
+                    WHERE runs.tag_schema != ?
             )
             ",
             (current_schema.cast_signed(),),
