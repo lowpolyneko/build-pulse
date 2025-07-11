@@ -189,11 +189,11 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
 
     // sort resultant groups
     groups.par_iter_mut().for_each(|g| g.par_sort());
-    groups.par_sort();
 
     // store relations in database
     groups
         .par_iter()
+        .filter(|g| g.len() > 1) // unique issues are discarded
         .flat_map(|g| {
             let mut hasher = DefaultHasher::new();
             g.hash(&mut hasher);
