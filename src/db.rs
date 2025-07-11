@@ -1,5 +1,6 @@
 //! [rusqlite] based ORM to cache build results.
 use std::{
+    collections::HashMap,
     hash::Hash,
     ops::{Deref, DerefMut},
 };
@@ -437,6 +438,36 @@ impl Database {
                     Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
                 })
             })
+    }
+
+    /// Get all similarities by [Tag] in [Database]
+    pub fn get_similarities(&self) -> Result<Vec<(String, String, Vec<String>)>> {
+        let mut hm: HashMap<u64, (String, String, Vec<String>)> = HashMap::new();
+        self.conn
+            .prepare_cached(
+                "SELECT DISTINCT similarity_hash, name, desc, display_name FROM similarities
+                JOIN issues ON issues.id = similarities.issue_id
+                JOIN tags ON tags.id = issues.tag_id
+                JOIN runs ON runs.id = issues.run_id",
+            )?
+            .query_map((), |row| {
+                Ok((
+                    row.get(0).map(i64::cast_unsigned)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .for_each(|(hash, name, desc, id)| {
+                hm.entry(hash)
+                    .or_insert((name, desc, Vec::new()))
+                    .2
+                    .push(id)
+            });
+
+        Ok(hm.into_values().collect())
     }
 
     /// Gets [Database]'s [Statistics]

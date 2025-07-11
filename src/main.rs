@@ -271,21 +271,21 @@ fn main() -> Result<()> {
 
     info!("Done!");
     info!("----------------------------------------");
-    info!("Calculating issue similarities...");
 
+    // purge old data
+    info!("Purging old runs...");
+    database.lock().unwrap().purge_old_runs()?;
+
+    info!("Purging extraneous tags...");
+    database.lock().unwrap().purge_orphan_tags()?;
+
+    info!("Calculating issue similarities...");
     calculate_similarities(&database)?;
 
     info!("Done!");
     info!("----------------------------------------");
 
     let database = database.into_inner().unwrap();
-
-    // purge old data
-    info!("Purging old runs...");
-    database.purge_old_runs()?;
-
-    info!("Purging extraneous tags...");
-    database.purge_orphan_tags()?;
 
     if let Some(output) = args.output {
         info!("Generating report...");

@@ -311,6 +311,30 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
                 }
             }
         }
+
+        h4 {
+            "Related Issues"
+        }
+        table style="border: 1px solid black;" {
+            @for (name, desc, group) in db.get_similarities()
+                .expect("Failed to get similarities from database.") {
+                tr style="border: 1px solid black;" {
+                    td style="border: 1px solid black;" {
+                        code title=(desc) {
+                            (name)
+                        }
+                    }
+                    td style="border: 1px solid black;" {
+                        p {
+                            @for display_name in group {
+                                (display_name)
+                                br;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
