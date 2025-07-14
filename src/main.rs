@@ -46,12 +46,14 @@ struct Args {
 /// Pull builds from `project.jobs` and cache them into database `db`
 fn pull_build_logs(
     project: &SparseMatrixProject,
+    blocklist: &[String],
     jenkins: &Jenkins,
     db: &Mutex<Database>,
 ) -> Result<()> {
     project
         .jobs
         .par_iter()
+        .filter(|job| !blocklist.contains(&job.name))
         .filter_map(|job| {
             // filter out jobs with no builds
             job.last_build.as_ref().map_or_else(
@@ -238,7 +240,13 @@ fn main() -> Result<()> {
     // purge outdated issues
     let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;
     if outdated > 0 {
-        warn!("Purged {outdated} issues that parsed with an outdated tag schema!");
+        warn!("Purged {outdated} runs' issues that parsed with an outdated tag schema!");
+    }
+
+    // purge blocklisted jobs
+    let blocked = database.purge_blocklisted_jobs(&config.blocklist)?;
+    if blocked > 0 {
+        warn!("Purged {blocked} jobs that are on the blocklist.");
     }
 
     info!(
@@ -260,7 +268,7 @@ fn main() -> Result<()> {
     let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
 
     let mut database = Mutex::new(database);
-    pull_build_logs(&project, &jenkins, &database)?;
+    pull_build_logs(&project, &config.blocklist, &jenkins, &database)?;
 
     info!("Done!");
     info!("----------------------------------------");
@@ -295,6 +303,7 @@ fn main() -> Result<()> {
 
         let markup = page::render(
             &project,
+            &config.blocklist,
             &database,
             UtcOffset::from_hms(config.timezone, 0, 0)?,
         )

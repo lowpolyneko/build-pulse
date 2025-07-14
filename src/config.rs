@@ -22,6 +22,9 @@ pub struct Config {
     /// Timezone in UTC+`timezone`
     pub timezone: i8,
 
+    /// Blocklist of jobs by name
+    pub blocklist: Vec<String>,
+
     /// [Vec] of [ConfigTag] to be parsed as [crate::parse::TagSet]
     pub tag: Vec<ConfigTag>,
 }

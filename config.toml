@@ -1,5 +1,12 @@
 jenkins_url = "https://jenkins-pmrs.cels.anl.gov"
 project = "mpich-main-nightly"
+blocklist = [
+    # ignored jobs
+    "build-pulse",
+    "mpich-main-ch4-ofi-multinic",
+    "mpich-main-noshared",
+    "xfail-mpich-main-ch4-special-tests"
+]
 
 timezone = -5 # in UTC-<hour> format
 
@@ -479,3 +486,5 @@ severity = "Metadata"
 # nofortran
 # pervci_lock
 # solstudio
+
+# vim: set ts=4:sw=4:expandtab:

@@ -652,9 +652,9 @@ impl Database {
             "
             DELETE FROM similarities WHERE similarity_hash IN (
                 SELECT DISTINCT similarities.similarity_hash FROM similarities
-                    JOIN issues ON issues.id = similarities.issue_id
-                    JOIN runs ON runs.id = issues.run_id
-                    WHERE runs.tag_schema != ?
+                JOIN issues ON issues.id = similarities.issue_id
+                JOIN runs ON runs.id = issues.run_id
+                WHERE runs.tag_schema != ?
             )
             ",
             (current_schema.cast_signed(),),
@@ -665,7 +665,7 @@ impl Database {
             "
             DELETE FROM issues WHERE id IN (
                 SELECT i.id FROM issues i
-                INNER JOIN runs r ON i.run_id = r.id
+                JOIN runs r ON i.run_id = r.id
                 WHERE r.tag_schema != ?
             )
             ",
@@ -679,6 +679,56 @@ impl Database {
         )
     }
 
+    /// Remove all [Job]s from [Database] by name
+    pub fn purge_blocklisted_jobs(&mut self, names: &[String]) -> Result<usize> {
+        let mut tx = self.conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
+
+        names.iter().try_fold(0, |acc, name| {
+            // delete similarities first
+            tx.execute(
+                "
+                DELETE FROM similarities WHERE similarity_hash IN (
+                    SELECT DISTINCT similarities.similarity_hash FROM similarities
+                    JOIN issues ON issues.id = similarities.issue_id
+                    JOIN runs ON runs.id = issues.run_id
+                    JOIN jobs ON jobs.id = runs.job_id
+                    WHERE name = ?
+                )
+                ",
+                (name,),
+            )?;
+
+            // then issues
+            tx.execute(
+                "
+                DELETE FROM issues WHERE id IN (
+                    SELECT issues.id FROM issues
+                    JOIN runs ON runs.id = issues.run_id
+                    JOIN jobs ON jobs.id = runs.job_id
+                    WHERE name = ?
+                )
+                ",
+                (name,),
+            )?;
+
+            // then runs
+            tx.execute(
+                "
+                DELETE FROM runs WHERE id IN (
+                    SELECT runs.id FROM runs
+                    JOIN jobs ON jobs.id = runs.job_id
+                    WHERE name = ?
+                );
+                ",
+                (name,),
+            )?;
+
+            // finally the job
+            Ok(acc + tx.execute("DELETE FROM jobs WHERE name = ?", (name,))?)
+        })
+    }
+
     /// Remove all [Run]s which aren't referenced by [Job] from [Database]
     pub fn purge_old_runs(&self) -> Result<()> {
         self.conn.execute_batch(
@@ -686,21 +736,21 @@ impl Database {
             BEGIN;
             DELETE FROM similarities WHERE similarity_hash IN (
                 SELECT DISTINCT similarities.similarity_hash FROM similarities
-                    JOIN issues ON issues.id = similarities.issue_id
-                    JOIN runs ON runs.id = issues.run_id
-                    JOIN jobs ON jobs.id = runs.job_id
-                    WHERE build_no != last_build
+                JOIN issues ON issues.id = similarities.issue_id
+                JOIN runs ON runs.id = issues.run_id
+                JOIN jobs ON jobs.id = runs.job_id
+                WHERE build_no != last_build
             );
             DELETE FROM issues WHERE id IN (
                 SELECT issues.id FROM issues
-                    JOIN runs ON runs.id = issues.run_id
-                    JOIN jobs ON jobs.id = runs.job_id
-                    WHERE build_no != last_build
+                JOIN runs ON runs.id = issues.run_id
+                JOIN jobs ON jobs.id = runs.job_id
+                WHERE build_no != last_build
             );
             DELETE FROM runs WHERE id IN (
                 SELECT runs.id FROM runs
-                    JOIN jobs ON jobs.id = runs.job_id
-                    WHERE build_no != last_build
+                JOIN jobs ON jobs.id = runs.job_id
+                WHERE build_no != last_build
             );
             COMMIT;
             ",

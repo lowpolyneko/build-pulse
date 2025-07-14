@@ -148,7 +148,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                                 @if i.duplicates > 0 {
                                     b {
                                         (i.duplicates)
-                                        " duplicate emit(s)"
+                                        " duplicate emits"
                                     }
                                 }
                                 hr;
@@ -346,7 +346,12 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
 }
 
 /// Render an HTML report for `project`
-pub fn render(project: &SparseMatrixProject, db: &Database, tz: UtcOffset) -> Markup {
+pub fn render(
+    project: &SparseMatrixProject,
+    blocklist: &[String],
+    db: &Database,
+    tz: UtcOffset,
+) -> Markup {
     let time: OffsetDateTime = SystemTime::now().into();
     html! {
         (DOCTYPE)
@@ -362,7 +367,12 @@ pub fn render(project: &SparseMatrixProject, db: &Database, tz: UtcOffset) -> Ma
                     "Job Status"
                 }
                 (render_stats(project, db))
-                @for job in &project.jobs {
+                @for job in
+                    project
+                        .jobs
+                        .iter()
+                        .filter(|j| !blocklist.contains(&j.name)
+                ) {
                     (render_job(job, db, tz))
                 }
                 p {
