@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent { label 'linux64' }
     parameters {
         booleanParam name: 'REUSE_DB', defaultValue: true, description: 'Whether or not to reuse the last `data.db`'
     }
