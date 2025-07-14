@@ -123,7 +123,7 @@ impl AsBuild for SparseBuild {
             number: self.number,
             status: self.result,
             timestamp: self.timestamp,
-            job_id: job_id,
+            job_id,
         }
     }
 }
@@ -151,7 +151,7 @@ where
                 _ => None,
             },
             tag_schema: None,
-            build_id: build_id,
+            build_id,
         }
     }
 }

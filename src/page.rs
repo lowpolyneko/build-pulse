@@ -32,7 +32,7 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
     };
     let sorted_runs = match &last_build {
         Some(b) => {
-            let mut sr = db.get_runs_by_build(&b)?;
+            let mut sr = db.get_runs_by_build(b)?;
             sr.par_sort_by_key(|r| match r.status {
                 Some(BuildStatus::Failure) => 0,
                 Some(BuildStatus::Unstable) => 1,
