@@ -8,7 +8,7 @@ use jenkins_api::{
 };
 use serde::Deserialize;
 
-use crate::db::Run;
+use crate::db::{JobBuild, Run};
 
 /// Represents all jobs pulled from [SparseMatrixProject::pull_jobs]
 #[derive(Deserialize)]
@@ -41,9 +41,6 @@ pub struct SparseBuild {
     /// Build URL
     pub url: String,
 
-    /// Build display name
-    pub display_name: String,
-
     /// Build timestamp
     pub timestamp: u64,
 
@@ -57,7 +54,13 @@ pub struct SparseBuild {
 /// Builds that can be represented as [Run]
 pub trait AsRun {
     /// Convert `&self` to [Run]
-    fn as_run(&self, job_id: i64, jenkins_client: &Jenkins) -> Run;
+    fn as_run(&self, build_id: i64, jenkins_client: &Jenkins) -> Run;
+}
+
+/// Builds that can be represented as [JobBuild]
+pub trait AsBuild {
+    /// Convert `&self` to [JobBuild]
+    fn as_build(&self, job_id: i64) -> JobBuild;
 }
 
 /// Jobs that can be represented as [Job]
@@ -68,9 +71,6 @@ pub trait AsJob {
 
 /// [Build]s with common fields
 pub trait HasBuildFields {
-    /// Get build number
-    fn number(&self) -> u32;
-
     /// Get [BuildStatus]
     fn build_status(&self) -> Option<BuildStatus>;
 
@@ -82,10 +82,6 @@ pub trait HasBuildFields {
 macro_rules! impl_HasBuildFields {
     (for $($t:ty),+) => {
         $(impl HasBuildFields for $t {
-            fn number(&self) -> u32 {
-                self.number
-            }
-
             fn build_status(&self) -> Option<BuildStatus> {
                 self.result
             }
@@ -113,8 +109,21 @@ impl Job for SparseJob {
 impl AsJob for SparseJob {
     fn as_job(&self) -> crate::db::Job {
         crate::db::Job {
-            name: self.name().to_string(),
+            name: self.name.clone(),
             last_build: self.last_build.as_ref().map(|b| b.number),
+            url: self.url.clone(),
+        }
+    }
+}
+
+impl AsBuild for SparseBuild {
+    fn as_build(&self, job_id: i64) -> JobBuild {
+        JobBuild {
+            url: self.url.clone(),
+            number: self.number,
+            status: self.result,
+            timestamp: self.timestamp,
+            job_id: job_id,
         }
     }
 }
@@ -123,15 +132,13 @@ impl<T> AsRun for T
 where
     T: Build + HasBuildFields,
 {
-    fn as_run(&self, job_id: i64, jenkins_client: &Jenkins) -> Run {
+    fn as_run(&self, build_id: i64, jenkins_client: &Jenkins) -> Run {
         let display_name = self.full_display_name_or_default();
         let status = self.build_status();
         Run {
-            job: job_id,
-            build_url: self.url().to_string(),
-            display_name: display_name.to_string(),
-            build_no: self.number(),
+            url: self.url().to_string(),
             status,
+            display_name: display_name.to_string(),
             log: match status {
                 Some(BuildStatus::Failure | BuildStatus::Unstable) => {
                     // only get log on failure
@@ -144,6 +151,7 @@ where
                 _ => None,
             },
             tag_schema: None,
+            build_id: build_id,
         }
     }
 }

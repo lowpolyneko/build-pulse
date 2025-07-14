@@ -48,32 +48,50 @@ pub struct Job {
     /// Unique name of [Job]
     pub name: String,
 
-    /// Last build number
+    /// [Job] url
+    pub url: String,
+
+    /// Number of last [JobBuild]
     pub last_build: Option<u32>,
+}
+
+/// [JobBuild] in [Database]
+pub struct JobBuild {
+    /// Build url
+    pub url: String,
+
+    /// Build status
+    pub status: Option<BuildStatus>,
+
+    /// Build number
+    pub number: u32,
+
+    /// Build timestamp
+    pub timestamp: u64,
+
+    /// ID of associated [Job]
+    pub job_id: i64,
 }
 
 /// [Run] stored in [Database]
 pub struct Run {
-    /// ID of associated [Job]
-    pub job: i64,
-
-    /// Build url
-    pub build_url: String,
-
-    /// Build `display_name`
-    pub display_name: String,
-
-    /// Build number
-    pub build_no: u32,
+    /// Run url
+    pub url: String,
 
     /// Build status
     pub status: Option<BuildStatus>,
+
+    /// Run `display_name`
+    pub display_name: String,
 
     /// Full console log
     pub log: Option<String>,
 
     /// Schema [Run] was parsed with
     pub tag_schema: Option<u64>,
+
+    /// ID of associated [JobBuild]
+    pub build_id: i64,
 }
 
 /// [Issue] stored in [Database]
@@ -106,6 +124,12 @@ pub struct Statistics {
 
     /// Not built [Run]s
     pub not_built: u64,
+
+    /// Number of [BuildStatus::Failure] [Job]s
+    pub failed_jobs: u64,
+
+    /// Total number of tracked [Job]s
+    pub total_jobs: u64,
 
     /// [Run]s with unknown issues
     pub unknown_issues: u64,
@@ -190,21 +214,32 @@ impl Database {
             CREATE TABLE IF NOT EXISTS jobs (
                 id              INTEGER PRIMARY KEY,
                 name            TEXT NOT NULL,
+                url             TEXT NOT NULL,
                 last_build      INTEGER,
-                UNIQUE(name)
+                UNIQUE(name, url)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS builds (
+                id              INTEGER PRIMARY KEY,
+                url             TEXT NOT NULL,
+                status          TEXT,
+                number          INTEGER NOT NULL,
+                timestamp       INTEGER NOT NULL,
+                job_id          INTEGER NOT NULL,
+                UNIQUE(url),
+                FOREIGN KEY(job_id)
+                    REFERENCES jobs(id)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS runs (
                 id              INTEGER PRIMARY KEY,
-                build_url       TEXT NOT NULL,
-                display_name    TEXT NOT NULL,
-                build_no        INTEGER NOT NULL,
+                url             TEXT NOT NULL,
                 status          TEXT,
+                display_name    TEXT NOT NULL,
                 log             TEXT,
                 tag_schema      INTEGER,
-                job_id          INTEGER NOT NULL,
-                UNIQUE(build_url),
-                FOREIGN KEY(job_id)
-                    REFERENCES jobs(id)
+                build_id        INTEGER NOT NULL,
+                UNIQUE(url),
+                FOREIGN KEY(build_id)
+                    REFERENCES builds(id)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS issues (
                 id              INTEGER PRIMARY KEY,
@@ -245,43 +280,82 @@ impl Database {
         self.conn
             .prepare_cached(
                 "
-                INSERT INTO jobs (name, last_build) VALUES (?, ?)
-                    ON CONFLICT(name) DO UPDATE SET
+                INSERT INTO jobs (
+                    name,
+                    url,
+                    last_build
+                ) VALUES (?, ?, ?)
+                    ON CONFLICT(name, url) DO UPDATE SET
                         last_build = excluded.last_build
                 ",
             )?
-            .execute((&job.name, job.last_build))?;
+            .execute((&job.name, job.url, job.last_build))?;
 
         // get the job as a second query in-case of an insert conflict
         self.get_job(&job.name)
     }
 
-    /// Insert a [Run] into [Database]
-    pub fn insert_run(&self, run: Run) -> Result<InDatabase<Run>> {
+    /// Upsert a [Run] into [Database]
+    pub fn upsert_run(&self, run: Run) -> Result<InDatabase<Run>> {
         self.conn
             .prepare_cached(
                 "
                 INSERT INTO runs (
-                    build_url,
-                    display_name,
-                    build_no,
+                    url,
                     status,
+                    display_name,
                     log,
                     tag_schema,
-                    job_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    build_id
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(url) DO UPDATE SET
+                        status = excluded.status,
+                        display_name = excluded.display_name,
+                        log = excluded.log,
+                        tag_schema = excluded.tag_schema,
+                        build_id = excluded.build_id
                 ",
             )?
             .execute((
-                &run.build_url,
-                &run.display_name,
-                run.build_no,
+                &run.url,
                 write_value!(run.status),
+                &run.display_name,
                 &run.log,
                 run.tag_schema.map(u64::cast_signed),
-                run.job,
+                run.build_id,
             ))?;
-        Ok(InDatabase::new(self.conn.last_insert_rowid(), run))
+
+        self.get_run(&run.url)
+    }
+
+    /// Upsert a [JobBuild] into [Database]
+    pub fn upsert_build(&self, build: JobBuild) -> Result<InDatabase<JobBuild>> {
+        self.conn
+            .prepare_cached(
+                "
+                INSERT INTO builds (
+                    url,
+                    status,
+                    number,
+                    timestamp,
+                    job_id
+                ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(url) DO UPDATE SET
+                        status = excluded.status,
+                        number = excluded.number,
+                        timestamp = excluded.timestamp,
+                        job_id = excluded.job_id
+                ",
+            )?
+            .execute((
+                &build.url,
+                write_value!(build.status),
+                build.number,
+                build.timestamp.cast_signed(),
+                build.job_id,
+            ))?;
+
+        self.get_build(build.job_id, build.number)
     }
 
     /// Insert a [Run]'s [Issue] into [Database]
@@ -370,49 +444,143 @@ impl Database {
     /// Get a [Job] from [Database]
     pub fn get_job(&self, name: &str) -> Result<InDatabase<Job>> {
         self.conn
-            .prepare_cached("SELECT id, last_build FROM jobs WHERE name = ?")?
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    url,
+                    last_build
+                FROM jobs WHERE name = ?
+                ",
+            )?
             .query_one((name,), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
                     Job {
                         name: name.to_string(),
-                        last_build: row.get(1)?,
+                        url: row.get(1)?,
+                        last_build: row.get(2)?,
+                    },
+                ))
+            })
+    }
+
+    /// Get all [Job]s from [Database]
+    pub fn get_all_jobs(&self) -> Result<Vec<InDatabase<Job>>> {
+        self.conn
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    name,
+                    url,
+                    last_build
+                FROM jobs
+                ",
+            )?
+            .query_map((), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Job {
+                        name: row.get(1)?,
+                        url: row.get(2)?,
+                        last_build: row.get(3)?,
+                    },
+                ))
+            })?
+            .collect()
+    }
+
+    /// Get a [JobBuild] from [Database]
+    pub fn get_build(&self, job_id: i64, number: u32) -> Result<InDatabase<JobBuild>> {
+        self.conn
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    url,
+                    status,
+                    timestamp
+                FROM builds
+                WHERE job_id = ?
+                AND number = ?
+                ",
+            )?
+            .query_one((job_id, number), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    JobBuild {
+                        url: row.get(1)?,
+                        status: read_value!(row, 2),
+                        number,
+                        timestamp: row.get(3).map(i64::cast_unsigned)?,
+                        job_id,
                     },
                 ))
             })
     }
 
     /// Get a [Run] from [Database]
-    pub fn get_run(&self, build_url: &str) -> Result<InDatabase<Run>> {
+    pub fn get_run(&self, url: &str) -> Result<InDatabase<Run>> {
         self.conn
             .prepare_cached(
                 "
                 SELECT
                     id,
-                    build_url,
-                    display_name,
-                    build_no,
+                    url,
                     status,
+                    display_name,
                     log,
                     tag_schema,
-                    job_id
-                FROM runs WHERE build_url = ?
+                    build_id
+                FROM runs WHERE url = ?
                 ",
             )?
-            .query_one((build_url,), |row| {
+            .query_one((url,), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
                     Run {
-                        build_url: row.get(1)?,
-                        display_name: row.get(2)?,
-                        build_no: row.get(3)?,
-                        status: read_value!(row, 4),
-                        log: row.get(5)?,
-                        tag_schema: row.get::<_, Option<i64>>(6)?.map(i64::cast_unsigned),
-                        job: row.get(7)?,
+                        url: row.get(1)?,
+                        status: read_value!(row, 2),
+                        display_name: row.get(3)?,
+                        log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        build_id: row.get(6)?,
                     },
                 ))
             })
+    }
+
+    /// Get [Run]s from [Database] by [JobBuild]
+    pub fn get_runs_by_build(&self, build: &InDatabase<JobBuild>) -> Result<Vec<InDatabase<Run>>> {
+        self.conn
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    url,
+                    status,
+                    display_name,
+                    log,
+                    tag_schema,
+                    build_id
+                FROM runs WHERE build_id = ?
+                ",
+            )?
+            .query_map((build.id,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Run {
+                        url: row.get(1)?,
+                        status: read_value!(row, 2),
+                        display_name: row.get(3)?,
+                        log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        build_id: row.get(6)?,
+                    },
+                ))
+            })?
+            .collect()
     }
 
     /// Get all [Run]s from [Database]
@@ -422,13 +590,12 @@ impl Database {
                 "
                 SELECT
                     id,
-                    build_url,
-                    display_name,
-                    build_no,
+                    url,
                     status,
+                    display_name,
                     log,
                     tag_schema,
-                    job_id
+                    build_id
                 FROM runs
                 ",
             )?
@@ -436,13 +603,12 @@ impl Database {
                 Ok(InDatabase::new(
                     row.get(0)?,
                     Run {
-                        build_url: row.get(1)?,
-                        display_name: row.get(2)?,
-                        build_no: row.get(3)?,
-                        status: read_value!(row, 4),
-                        log: row.get(5)?,
-                        tag_schema: row.get::<_, Option<i64>>(6)?.map(i64::cast_unsigned),
-                        job: row.get(7)?,
+                        url: row.get(1)?,
+                        status: read_value!(row, 2),
+                        display_name: row.get(3)?,
+                        log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        build_id: row.get(6)?,
                     },
                 ))
             })?
@@ -575,6 +741,28 @@ impl Database {
             });
 
         // runs with unknown issues are runs
+        stats.failed_jobs = self
+            .conn
+            .prepare(
+                "
+                SELECT COUNT(*) FROM jobs j
+                WHERE EXISTS (
+                    SELECT 1 FROM builds
+                    WHERE builds.job_id = j.id
+                    AND status = ?
+                )
+                ",
+            )?
+            .query_one((write_value!(Some(BuildStatus::Failure)),), |row| {
+                row.get(0)
+            })?;
+
+        stats.total_jobs = self
+            .conn
+            .prepare("SELECT COUNT(*) FROM jobs")?
+            .query_one((), |row| row.get(0))?;
+
+        // runs with unknown issues are runs
         stats.unknown_issues = self
             .conn
             .prepare(
@@ -692,7 +880,8 @@ impl Database {
                     SELECT DISTINCT similarities.similarity_hash FROM similarities
                     JOIN issues ON issues.id = similarities.issue_id
                     JOIN runs ON runs.id = issues.run_id
-                    JOIN jobs ON jobs.id = runs.job_id
+                    JOIN builds ON builds.id = runs.build_id
+                    JOIN jobs ON jobs.id = builds.job_id
                     WHERE name = ?
                 )
                 ",
@@ -705,7 +894,8 @@ impl Database {
                 DELETE FROM issues WHERE id IN (
                     SELECT issues.id FROM issues
                     JOIN runs ON runs.id = issues.run_id
-                    JOIN jobs ON jobs.id = runs.job_id
+                    JOIN builds ON builds.id = runs.build_id
+                    JOIN jobs ON jobs.id = builds.job_id
                     WHERE name = ?
                 )
                 ",
@@ -717,7 +907,20 @@ impl Database {
                 "
                 DELETE FROM runs WHERE id IN (
                     SELECT runs.id FROM runs
-                    JOIN jobs ON jobs.id = runs.job_id
+                    JOIN builds ON builds.id = runs.build_id
+                    JOIN jobs ON jobs.id = builds.job_id
+                    WHERE name = ?
+                );
+                ",
+                (name,),
+            )?;
+
+            // then builds
+            tx.execute(
+                "
+                DELETE FROM builds WHERE id IN (
+                    SELECT builds.id FROM builds
+                    JOIN jobs ON jobs.id = builds.job_id
                     WHERE name = ?
                 );
                 ",
@@ -729,8 +932,8 @@ impl Database {
         })
     }
 
-    /// Remove all [Run]s which aren't referenced by [Job] from [Database]
-    pub fn purge_old_runs(&self) -> Result<()> {
+    /// Remove all [JobBuild]s which aren't referenced by [Job] from [Database]
+    pub fn purge_old_builds(&self) -> Result<()> {
         self.conn.execute_batch(
             "
             BEGIN;
@@ -738,19 +941,27 @@ impl Database {
                 SELECT DISTINCT similarities.similarity_hash FROM similarities
                 JOIN issues ON issues.id = similarities.issue_id
                 JOIN runs ON runs.id = issues.run_id
-                JOIN jobs ON jobs.id = runs.job_id
-                WHERE build_no != last_build
+                JOIN builds ON builds.id = runs.build_id
+                JOIN jobs ON jobs.id = builds.job_id
+                WHERE number != last_build
             );
             DELETE FROM issues WHERE id IN (
                 SELECT issues.id FROM issues
                 JOIN runs ON runs.id = issues.run_id
-                JOIN jobs ON jobs.id = runs.job_id
-                WHERE build_no != last_build
+                JOIN builds ON builds.id = runs.build_id
+                JOIN jobs ON jobs.id = builds.job_id
+                WHERE number != last_build
             );
             DELETE FROM runs WHERE id IN (
                 SELECT runs.id FROM runs
-                JOIN jobs ON jobs.id = runs.job_id
-                WHERE build_no != last_build
+                JOIN builds ON builds.id = runs.build_id
+                JOIN jobs ON jobs.id = builds.job_id
+                WHERE number != last_build
+            );
+            DELETE FROM builds WHERE id IN (
+                SELECT builds.id FROM builds
+                JOIN jobs ON jobs.id = builds.job_id
+                WHERE number != last_build
             );
             COMMIT;
             ",
@@ -778,6 +989,7 @@ impl Database {
             DELETE FROM similarities;
             DELETE FROM issues;
             DELETE FROM runs;
+            DELETE FROM builds;
             DELETE FROM jobs;
             DELETE FROM tags;
             COMMIT;

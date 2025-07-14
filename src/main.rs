@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use time::UtcOffset;
 
 use crate::{
-    api::{AsJob, AsRun, SparseMatrixProject},
+    api::{AsBuild, AsJob, AsRun, SparseMatrixProject},
     config::{Config, Field, Severity},
     db::{Database, InDatabase, Issue},
     parse::{Tag, TagSet, normalized_levenshtein_distance},
@@ -82,45 +82,61 @@ fn pull_build_logs(
                 mb,
             ))
         })
+        .map(|res| match res {
+            Ok((db_job, build, mb)) => {
+                let job_id = db_job.id;
+                Ok((
+                    db_job,
+                    db.lock()
+                        .unwrap()
+                        .upsert_build(build.as_build(job_id))
+                        .map_err(Error::from)?,
+                    mb,
+                ))
+            }
+            Err(e) => Err(e),
+        })
         .filter_map(|res| match res {
-            Ok((db_job, build, mb)) => match db.lock().unwrap().get_run(&mb.url) {
+            Ok((db_job, db_build, mb)) => match db.lock().unwrap().get_run(&mb.url) {
                 Ok(_) => None, // cached
-                Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, build, mb))),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, db_build, mb))),
                 Err(e) => Some(Err(Error::from(e))),
             },
             Err(e) => Some(Err(e)),
         })
         .map(|res| match res {
-            Ok((db_job, build, mb)) => Ok((
+            Ok((db_job, db_build, mb)) => Ok((
                 db_job,
-                build,
+                db_build,
                 mb.get_full_build(jenkins).map_err(Error::from_boxed)?,
             )),
             Err(e) => Err(e),
         })
         .map(|res| match res {
-            Ok((db_job, build, full_mb)) => {
-                let id = db_job.id;
-                Ok((db_job, build, full_mb.as_run(id, jenkins))) // build log is pulled here
+            Ok((db_job, db_build, full_mb)) => {
+                let build_id = db_build.id;
+                Ok((db_job, db_build, full_mb.as_run(build_id, jenkins))) // build log is pulled here
             }
             Err(e) => Err(e),
         })
         .map(|res| match res {
-            Ok((db_job, build, run)) => Ok((db_job, build, db.lock().unwrap().insert_run(run)?)),
+            Ok((db_job, db_build, run)) => {
+                Ok((db_job, db_build, db.lock().unwrap().upsert_run(run)?))
+            }
             Err(e) => Err(e),
         })
         .try_for_each(|res| match res {
-            Ok((db_job, build, committed_run)) => {
+            Ok((db_job, db_build, db_run)) => {
                 log!(
-                    match committed_run.status {
+                    match db_run.status {
                         Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
                         _ => Level::Info,
                     },
-                    "Job '{}{}' run '{}' finished with status {:?}.",
+                    "Job '{}#{}' run '{}' finished with status {:?}.",
                     db_job.name,
-                    build.display_name,
-                    committed_run.display_name,
-                    committed_run.status
+                    db_build.number,
+                    db_run.display_name,
+                    db_run.status
                 );
 
                 Ok(())
@@ -282,7 +298,7 @@ fn main() -> Result<()> {
 
         // purge old data
         info!("Purging old runs...");
-        database.get_mut().unwrap().purge_old_runs()?;
+        database.get_mut().unwrap().purge_old_builds()?;
 
         info!("Purging extraneous tags...");
         database.get_mut().unwrap().purge_orphan_tags()?;
@@ -301,13 +317,8 @@ fn main() -> Result<()> {
     if let Some(output) = args.output {
         info!("Generating report...");
 
-        let markup = page::render(
-            &project,
-            &config.blocklist,
-            &database,
-            UtcOffset::from_hms(config.timezone, 0, 0)?,
-        )
-        .into_string();
+        let markup =
+            page::render(&database, UtcOffset::from_hms(config.timezone, 0, 0)?)?.into_string();
 
         if let Some(filepath) = output {
             fs::write(&filepath, markup)?;

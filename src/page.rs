@@ -1,18 +1,19 @@
 //! HTML report generation using [maud] templating.
 use std::time::SystemTime;
 
-use jenkins_api::{build::BuildStatus, job::Job};
+use anyhow::{Error, Result};
+use jenkins_api::build::BuildStatus;
 use maud::{DOCTYPE, Markup, html};
+use rayon::slice::ParallelSliceMut;
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
-    api::{SparseJob, SparseMatrixProject},
     config::Severity,
-    db::{Database, InDatabase, Run},
+    db::{Database, InDatabase, Job, Run},
 };
 
 /// Format `time` as a [String]
-fn format_timestamp<T>(time: T) -> String
+fn format_timestamp<T>(time: T) -> Result<String>
 where
     T: Into<OffsetDateTime>,
 {
@@ -20,55 +21,57 @@ where
         .format(
             format_description!("[month repr:short] [day], [year] [hour repr:12]:[minute]:[second] [period] UTC[offset_hour padding:none sign:mandatory]")
         )
-        .unwrap()
+        .map_err(Error::from)
 }
 
 /// Render a [SparseJob]
-fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
-    let sorted_runs = match job.last_build.as_ref() {
-        Some(b) => match b.runs.as_ref() {
-            Some(runs) => {
-                let mut sr = runs
-                    .iter()
-                    .filter(|r| r.number == b.number)
-                    .map(|r| db.get_run(&r.url).expect("Expecting valid run here..."))
-                    .collect::<Vec<_>>();
+fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Markup> {
+    let last_build = match job.last_build {
+        Some(n) => Some(db.get_build(job.id, n)?),
+        None => None,
+    };
+    let sorted_runs = match &last_build {
+        Some(b) => {
+            let mut sr = db.get_runs_by_build(&b)?;
+            sr.par_sort_by_key(|r| match r.status {
+                Some(BuildStatus::Failure) => 0,
+                Some(BuildStatus::Unstable) => 1,
+                Some(BuildStatus::Success) => 2,
+                Some(BuildStatus::NotBuilt) => 3,
+                Some(BuildStatus::Aborted) => 4,
+                None => 4,
+            });
 
-                sr.sort_by_key(|r| match r.status {
-                    Some(BuildStatus::Failure) => 0,
-                    Some(BuildStatus::Unstable) => 1,
-                    Some(BuildStatus::Success) => 2,
-                    Some(BuildStatus::NotBuilt) => 3,
-                    Some(BuildStatus::Aborted) => 4,
-                    None => 4,
-                });
-
-                Some(sr)
-            }
-            None => None,
-        },
+            Some(sr)
+        }
         None => None,
     };
 
-    html! {
+    Ok(html! {
         h2 {
-            a href=(job.url()) {
-                (job.name())
+            a href=(job.url) {
+                (job.name)
             }
         }
-        @if let Some(build) = job.last_build.as_ref() {
+        @if let Some(build) = last_build {
             p {
                 "Last build: "
                 a href=(build.url) {
-                    (build.display_name)
+                    "#"
+                    (build.number)
                 }
                 " on "
                 i {
-                    (format_timestamp(OffsetDateTime::from_unix_timestamp((build.timestamp/1000).cast_signed()).expect("Jenkins returned an invalid timestamp!").to_offset(tz)))
+                    (format_timestamp(
+                        OffsetDateTime::from_unix_timestamp(
+                            (build.timestamp/1000).cast_signed()
+                        )?
+                        .to_offset(tz)
+                    )?)
                 }
                 " was "
                 b {
-                    @match build.result {
+                    @match build.status {
                         Some(BuildStatus::Success) => "good",
                         Some(BuildStatus::Failure) => "bad",
                         Some(BuildStatus::Unstable) => "unstable",
@@ -79,7 +82,7 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
                 }
             }
             @if let Some(runs) = sorted_runs {
-                details open[matches!(build.result, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
+                details open[matches!(build.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
                     summary {
                         "Run Information"
                     }
@@ -95,7 +98,7 @@ fn render_job(job: &SparseJob, db: &Database, tz: UtcOffset) -> Markup {
                 "No builds available."
             }
         }
-    }
+    })
 }
 
 /// Render a [Run]
@@ -121,7 +124,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 }
             }
             td style="border: 1px solid black;" { // name
-                a href=(run.build_url) {
+                a href=(run.url) {
                     (run.display_name)
                 }
             }
@@ -156,7 +159,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         }
                     }
                 }
-                a href=(format!("{}/consoleFull", run.build_url)) {
+                a href=(format!("{}/consoleFull", run.url)) {
                     "Full Build Log"
                 }
             }
@@ -165,32 +168,19 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
 }
 
 /// Render [crate::db::Statistics]
-fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
-    let stats = db
-        .get_stats()
-        .expect("Failed to get statistics from database.");
-    html! {
+fn render_stats(db: &Database) -> Result<Markup> {
+    let stats = db.get_stats()?;
+    Ok(html! {
         h3 {
             "Run Statistics"
         }
-        @let health = project
-                        .jobs
-                        .iter()
-                        .filter_map(|j| j.last_build.as_ref())
-                        .fold(0, |h, b|
-                            h + match b.result {
-                                Some(BuildStatus::Success) => 1,
-                                _ => 0,
-                            }
-        );
-        @let total = project.jobs.len();
         p {
             "Overall Job Health:"
-            progress value=(health) max=(total) {}
+            progress value=(stats.failed_jobs) max=(stats.total_jobs) {}
             br;
-            (health)
+            (stats.failed_jobs)
             " out of "
-            (total)
+            (stats.total_jobs)
             " jobs successful."
         }
 
@@ -251,7 +241,11 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
                 }
                 td style="border: 1px solid black;" {
                     b {
-                        (stats.successful + stats.failures + stats.unstable + stats.aborted + stats.not_built)
+                        (stats.successful
+                         + stats.failures
+                         + stats.unstable
+                         + stats.aborted
+                         + stats.not_built)
                         " runs"
                     }
                 }
@@ -322,8 +316,7 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
             "Related Issues"
         }
         table style="border: 1px solid black;" {
-            @for (name, desc, group) in db.get_similarities()
-                .expect("Failed to get similarities from database.") {
+            @for (name, desc, group) in db.get_similarities()? {
                 tr style="border: 1px solid black;" {
                     td style="border: 1px solid black;" {
                         code title=(desc) {
@@ -342,18 +335,12 @@ fn render_stats(project: &SparseMatrixProject, db: &Database) -> Markup {
                 }
             }
         }
-    }
+    })
 }
 
-/// Render an HTML report for `project`
-pub fn render(
-    project: &SparseMatrixProject,
-    blocklist: &[String],
-    db: &Database,
-    tz: UtcOffset,
-) -> Markup {
-    let time: OffsetDateTime = SystemTime::now().into();
-    html! {
+/// Render an HTML report for [Database] info
+pub fn render(db: &Database, tz: UtcOffset) -> Result<Markup> {
+    Ok(html! {
         (DOCTYPE)
         html lang="en" {
             head {
@@ -366,22 +353,20 @@ pub fn render(
                 h1 {
                     "Job Status"
                 }
-                (render_stats(project, db))
-                @for job in
-                    project
-                        .jobs
-                        .iter()
-                        .filter(|j| !blocklist.contains(&j.name)
-                ) {
-                    (render_job(job, db, tz))
+                (render_stats(db)?)
+                @for job in db.get_all_jobs()? {
+                    (render_job(&job, db, tz)?)
                 }
                 p {
                     "Report generated on "
                     code {
-                        (format_timestamp(time.to_offset(tz)))
+                        (format_timestamp(
+                            OffsetDateTime::from(SystemTime::now())
+                            .to_offset(tz)
+                        )?)
                     }
                 }
             }
         }
-    }
+    })
 }
