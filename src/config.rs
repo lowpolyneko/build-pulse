@@ -1,4 +1,6 @@
 //! [Config] file structure.
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 /// Representation of a "config.toml" file
@@ -25,8 +27,21 @@ pub struct Config {
     /// Blocklist of jobs by name
     pub blocklist: Vec<String>,
 
+    /// List of custom [TagView] to be rendered
+    pub view: Vec<TagView>,
+
     /// [Vec] of [ConfigTag] to be parsed as [crate::parse::TagSet]
     pub tag: Vec<ConfigTag>,
+}
+
+/// Represesnts one [crate::parse::Tag] view to be rendered
+#[derive(Deserialize)]
+pub struct TagView {
+    /// Name of the view
+    pub name: String,
+
+    /// TagExpr to query [crate::db::Database] with
+    pub expr: String,
 }
 
 /// Represents one tag to be loaded as [crate::parse::Tag]
@@ -49,7 +64,12 @@ pub struct ConfigTag {
 }
 
 macro_rules! fields {
-    ($name:ident, $docstring:expr, $($member:tt),*) => {
+    (
+        #[doc = $docstring:expr]
+        pub enum $name:ident {
+            $($member:tt),*,
+        }
+    ) => {
         #[doc = $docstring]
         #[derive(Deserialize, Serialize, Clone, Copy, Eq, PartialEq, Hash)]
         pub enum $name {$($member),*}
@@ -61,21 +81,31 @@ macro_rules! fields {
                 vec![$($name::$member,)*].into_iter()
             }
         }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self {
+                    $($name::$member => write!(f, stringify!($member))),*
+                }
+            }
+        }
     }
 }
 
-fields!(
-    Field,
-    "Valid fields to pattern match from",
-    Console,
-    RunName
-);
+fields! {
+    #[doc = "Valid fields to pattern match from"]
+    pub enum Field {
+        Console,
+        RunName,
+    }
+}
 
-fields!(
-    Severity,
-    "Represents how severe a tag is",
-    Metadata,
-    Info,
-    Warning,
-    Error
-);
+fields! {
+    #[doc = "Represents how severe a tag is"]
+    pub enum Severity {
+        Metadata,
+        Info,
+        Warning,
+        Error,
+    }
+}

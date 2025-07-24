@@ -15,6 +15,20 @@ timezone = -5 # in UTC-<hour> format
 
 database = "data.db"
 
+### VIEWS
+### ----------------------------------------------------------------------
+[[view]]
+name = "By Tag"
+expr = '!S"Metadata"'
+
+[[view]]
+name = "By Metadata"
+expr = 'S"Metadata"'
+
+[[view]]
+name = "Jenkins Failures By Platform"
+expr = 'T"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|(softiron-[0-9]+)" && jenkins_agent_offline'
+
 ### FATAL TOOLING EMITS
 ### ----------------------------------------------------------------------
 [[tag]]
@@ -393,14 +407,6 @@ severity = "Metadata"
 name = "tiger"
 desc = "tiger Build Node"
 
-pattern = '''(?m)^Building remotely on tiger \(xpmem\).*$'''
-from = "Console"
-severity = "Metadata"
-
-[[tag]]
-name = "tiger"
-desc = "tiger Build Node"
-
 pattern = '''(?m)^Building remotely on tiger.*$'''
 from = "Console"
 severity = "Metadata"
@@ -487,4 +493,4 @@ severity = "Metadata"
 # pervci_lock
 # solstudio
 
-# vim: set ts=4:sw=4:expandtab:
+# vim: ts=4:sw=4:expandtab:
