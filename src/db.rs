@@ -6,15 +6,17 @@ use std::{
 };
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, params_from_iter};
 use serde_json::{from_value, to_value};
 
 use crate::{
     config::{Field, Severity},
     parse::{Tag, TagSet},
+    tag_expr::TagExpr,
 };
 
 /// Read [serde] serialized value from `row` and `idx`
+#[macro_export]
 macro_rules! read_value {
     ($row:ident, $idx:literal) => {
         from_value($row.get($idx)?).map_err(|e| {
@@ -22,15 +24,9 @@ macro_rules! read_value {
         })?
     };
 }
-macro_rules! try_read_value {
-    ($row:ident, $idx:literal) => {
-        from_value($row.get($idx)?).map_err(|e| {
-            Error::FromSqlConversionFailure($idx, rusqlite::types::Type::Text, e.into())
-        })
-    };
-}
 
 /// Write as [serde] serializable value
+#[macro_export]
 macro_rules! write_value {
     ($val:expr) => {
         to_value($val).map_err(|e| Error::ToSqlConversionFailure(e.into()))?
@@ -136,9 +132,21 @@ pub struct Statistics {
 
     /// Total [Issue]s found
     pub issues_found: u64,
+}
 
-    /// Counts of each [Tag] found
-    pub tag_counts: Vec<(String, String, Severity, u64)>,
+#[derive(PartialEq, Eq, Hash)]
+pub struct TagInfo {
+    /// Name of [Tag]
+    pub name: String,
+
+    /// Description of [Tag]
+    pub desc: String,
+
+    /// Field of [Tag]
+    pub field: Field,
+
+    /// Severity of [Tag]
+    pub severity: Severity,
 }
 
 /// Represents an item `T` in [Database]
@@ -201,9 +209,23 @@ impl<T> PartialEq for InDatabase<T> {
 
 impl<T> Eq for InDatabase<T> {}
 
+impl From<&Tag<'_>> for TagInfo {
+    fn from(value: &Tag<'_>) -> Self {
+        TagInfo {
+            name: value.name.to_string(),
+            desc: value.desc.to_string(),
+            field: *value.from,
+            severity: *value.severity,
+        }
+    }
+}
+
 impl Database {
     /// Open or create an `sqlite3` database at `path` returning [Database]
     pub fn open(path: &str) -> Result<Database> {
+        // Enable REGEXP
+        rusqlite_regex::enable_auto_extension()?;
+
         // try to open existing, otherwise create a new one
         let conn = Connection::open(path)?;
 
@@ -367,7 +389,7 @@ impl Database {
         unsafe {
             // SAFETY: `Run` owns all underlying `Issue`s
             let start = issue.snippet.as_ptr().offset_from_unsigned(
-                match self.get_tag_field(issue.tag)? {
+                match self.get_tag(issue.tag)?.field {
                     Field::Console => run.log.as_ref().unwrap(),
                     Field::RunName => &run.display_name,
                 }
@@ -437,7 +459,7 @@ impl Database {
             ))?;
 
             // get the tag id as a second query in-case of an insert conflict
-            Ok(InDatabase::new(self.get_tag_id(t.name)?, t))
+            Ok(InDatabase::new(self.get_tag_by_name(t.name)?.id, t))
         })
     }
 
@@ -619,7 +641,7 @@ impl Database {
     pub fn get_issues<'a>(
         &self,
         run: &'a InDatabase<Run>,
-    ) -> Result<Vec<(InDatabase<Issue<'a>>, Severity)>> {
+    ) -> Result<Vec<(InDatabase<Issue<'a>>, InDatabase<TagInfo>)>> {
         self.conn
             .prepare_cached(
                 "
@@ -629,6 +651,8 @@ impl Database {
                     snippet_end,
                     tag_id,
                     duplicates,
+                    name,
+                    desc,
                     field,
                     severity
                 FROM issues
@@ -637,11 +661,12 @@ impl Database {
                 ",
             )?
             .query_map((run.id,), |row| {
+                let field = read_value!(row, 7);
                 Ok((
                     InDatabase::new(
                         row.get(0)?,
                         Issue {
-                            snippet: &match read_value!(row, 5) {
+                            snippet: &match field {
                                 Field::Console => run
                                     .log
                                     .as_ref()
@@ -652,38 +677,151 @@ impl Database {
                             duplicates: row.get(4).map(i64::cast_unsigned)?,
                         },
                     ),
-                    read_value!(row, 6),
+                    InDatabase::new(
+                        row.get(3)?,
+                        TagInfo {
+                            name: row.get(5)?,
+                            desc: row.get(6)?,
+                            field,
+                            severity: read_value!(row, 8),
+                        },
+                    ),
                 ))
             })?
             .collect()
     }
 
-    /// Get all [Tag]s from [Run]
-    pub fn get_tags(&self, run: &InDatabase<Run>) -> Result<Vec<(String, String)>> {
+    /// Get all [Issue] IDs keyed by all [Tag]s in [Database]
+    pub fn get_issue_ids_by_tag(
+        &self,
+        tags: &[InDatabase<TagInfo>],
+    ) -> Result<HashMap<InDatabase<TagInfo>, Vec<i64>>> {
+        let mut hm = HashMap::new();
         self.conn
             .prepare_cached(
                 "
-                SELECT DISTINCT name, desc FROM tags
+                SELECT tags.id, name, desc, field, severity, issues.id FROM tags
+                JOIN issues ON issues.tag_id IN ?
+                ",
+            )?
+            .query_map(params_from_iter(tags.iter().map(|t| t.id)), |row| {
+                Ok((
+                    InDatabase::new(
+                        row.get(0)?,
+                        TagInfo {
+                            name: row.get(1)?,
+                            desc: row.get(2)?,
+                            field: read_value!(row, 3),
+                            severity: read_value!(row, 4),
+                        },
+                    ),
+                    row.get(5)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .for_each(|(tag, id)| {
+                hm.entry(tag)
+                    .and_modify(|v: &mut Vec<i64>| v.push(id))
+                    .or_insert_with(|| vec![id]);
+            });
+
+        Ok(hm)
+    }
+
+    /// Get a [Tag]'s [TagInfo] from [Database]
+    pub fn get_tag(&self, id: i64) -> Result<InDatabase<TagInfo>> {
+        self.conn
+            .prepare_cached("SELECT id, name, desc, severity, field FROM tags WHERE tags.id = ?")?
+            .query_one((id,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    TagInfo {
+                        name: row.get(1)?,
+                        desc: row.get(2)?,
+                        severity: read_value!(row, 3),
+                        field: read_value!(row, 4),
+                    },
+                ))
+            })
+    }
+
+    /// Get a [TagInfo] from [Database] by name
+    pub fn get_tag_by_name(&self, name: &str) -> Result<InDatabase<TagInfo>> {
+        self.conn
+            .prepare_cached("SELECT id, name, desc, severity, field FROM tags WHERE name = ?")?
+            .query_one((name,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    TagInfo {
+                        name: row.get(1)?,
+                        desc: row.get(2)?,
+                        severity: read_value!(row, 3),
+                        field: read_value!(row, 4),
+                    },
+                ))
+            })
+    }
+
+    /// Get all [TagInfo]s in [Database]
+    pub fn get_tags(&self) -> Result<Vec<InDatabase<TagInfo>>> {
+        self.conn
+            .prepare_cached("SELECT id, name, desc, severity, field FROM tags")?
+            .query_map((), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    TagInfo {
+                        name: row.get(1)?,
+                        desc: row.get(2)?,
+                        severity: read_value!(row, 3),
+                        field: read_value!(row, 4),
+                    },
+                ))
+            })?
+            .collect()
+    }
+
+    /// Get all [TagInfo]s by [TagExpr] in [Database]
+    pub fn get_tags_by_expr(&self, expr: &TagExpr) -> Result<Vec<InDatabase<TagInfo>>> {
+        let (stmt, params) = expr.to_sql_select()?;
+        self.conn
+            .prepare(&stmt)?
+            .query_map(params, |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    TagInfo {
+                        name: row.get(1)?,
+                        desc: row.get(2)?,
+                        field: read_value!(row, 3),
+                        severity: read_value!(row, 4),
+                    },
+                ))
+            })?
+            .collect()
+    }
+
+    /// Get all [TagInfo]s from [Run]
+    pub fn get_tags_from_run(&self, run: &InDatabase<Run>) -> Result<Vec<InDatabase<TagInfo>>> {
+        self.conn
+            .prepare_cached(
+                "
+                SELECT DISTINCT id, name, desc, field, severity FROM tags
                 JOIN issues ON issues.tag_id = tags.id
                 WHERE issues.run_id = ?
                 ",
             )?
-            .query_map((run.id,), |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map((run.id,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    TagInfo {
+                        name: row.get(1)?,
+                        desc: row.get(2)?,
+                        field: read_value!(row, 3),
+                        severity: read_value!(row, 4),
+                    },
+                ))
+            })?
             .collect()
-    }
-
-    /// Get a [Tag]'s ID from [Database]
-    pub fn get_tag_id(&self, name: &str) -> Result<i64> {
-        self.conn
-            .prepare_cached("SELECT id FROM tags WHERE name = ?")?
-            .query_one((name,), |row| row.get(0))
-    }
-
-    /// Get a [Tag]'s [Field] from [Database]
-    pub fn get_tag_field(&self, id: i64) -> Result<Field> {
-        self.conn
-            .prepare_cached("SELECT field FROM tags WHERE tags.id = ?")?
-            .query_one((id,), |row| try_read_value!(row, 0))
     }
 
     /// Get all similarities by [Tag] in [Database]
@@ -740,14 +878,14 @@ impl Database {
                 stats
             });
 
-        // runs with unknown issues are runs
         stats.failed_jobs = self
             .conn
             .prepare(
                 "
                 SELECT COUNT(*) FROM jobs j
                 WHERE EXISTS (
-                    SELECT 1 FROM builds
+                    SELECT 1 FROM runs
+                    JOIN builds ON runs.build_id = builds.id
                     WHERE builds.job_id = j.id
                     AND status = ?
                 )
@@ -762,7 +900,6 @@ impl Database {
             .prepare("SELECT COUNT(*) FROM jobs")?
             .query_one((), |row| row.get(0))?;
 
-        // runs with unknown issues are runs
         stats.unknown_issues = self
             .conn
             .prepare(
@@ -797,20 +934,6 @@ impl Database {
                 ",
             )?
             .query_one((write_value!(Severity::Metadata),), |row| row.get(0))?;
-
-        stats.tag_counts = self
-            .conn
-            .prepare(
-                "
-                SELECT name, desc, severity, COUNT(*) FROM issues
-                JOIN tags ON tags.id = issues.tag_id
-                GROUP BY issues.tag_id
-                ",
-            )?
-            .query_map((), |row| {
-                Ok((row.get(0)?, row.get(1)?, read_value!(row, 2), row.get(3)?))
-            })?
-            .collect::<Result<Vec<_>>>()?;
 
         Ok(stats)
     }

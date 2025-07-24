@@ -8,8 +8,9 @@ use rayon::slice::ParallelSliceMut;
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
-    config::Severity,
+    config::{Severity, TagView},
     db::{Database, InDatabase, Job, Run},
+    tag_expr::TagExpr,
 };
 
 /// Format `time` as a [String]
@@ -134,17 +135,17 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         b {
                             "Identified Tags: "
                         }
-                        @if let Ok(tags) = db.get_tags(run) {
-                            @for (name, desc) in tags {
-                                code title=(desc) {
-                                    (name)
+                        @if let Ok(tags) = db.get_tags_from_run(run) {
+                            @for t in tags {
+                                code title=(t.desc) {
+                                    (t.name)
                                     ", "
                                 }
                             }
                         }
                         hr;
                         @for (i, s) in issues {
-                            @if !matches!(s, Severity::Metadata) {
+                            @if !matches!(s.severity, Severity::Metadata) {
                                 pre {
                                     (i.snippet)
                                 }
@@ -252,64 +253,11 @@ fn render_stats(db: &Database) -> Result<Markup> {
             }
         }
 
-        h4 {
-            "By Tag"
-        }
-        table style="border: 1px solid black;" {
-            @for (name, desc, severity, count) in &stats.tag_counts {
-                @if !matches!(severity, Severity::Metadata) {
-                    tr style="border: 1px solid black;" {
-                        td style="border: 1px solid black;" {
-                            code title=(desc) {
-                                (name)
-                            }
-                        }
-                        td style="border: 1px solid black;" {
-                            (count)
-                            " issues"
-                        }
-                    }
-                }
-            }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
-                    b {
-                        "Total"
-                    }
-                }
-                td style="border: 1px solid black;" {
-                    b {
-                        (stats.issues_found)
-                        " issues found!"
-                    }
-                }
-            }
-        }
-
         b {
+            (stats.issues_found)
+            " issues found!"
             (stats.unknown_issues)
             " runs with unknown issues!"
-        }
-
-        h4 {
-            "By Metadata"
-        }
-        table style="border: 1px solid black;" {
-            @for (name, desc, severity, count) in &stats.tag_counts {
-                @if matches!(severity, Severity::Metadata) {
-                    tr style="border: 1px solid black;" {
-                        td style="border: 1px solid black;" {
-                            code title=(desc) {
-                                (name)
-                            }
-                        }
-                        td style="border: 1px solid black;" {
-                            (count)
-                            " runs"
-                        }
-                    }
-                }
-            }
         }
 
         h4 {
@@ -338,8 +286,44 @@ fn render_stats(db: &Database) -> Result<Markup> {
     })
 }
 
+/// Render a [TagView]
+fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
+    let expr = match TagExpr::parse(&view.expr) {
+        Ok(expr) => Ok(expr),
+        Err(e) => Err(Error::msg(
+            e.iter().fold(String::new(), |acc, e| format!("{acc}\n{e}")),
+        )),
+    }?;
+    let rows = expr.eval_rows(&db.get_tags()?);
+
+    Ok(html! {
+        h4 {
+            (view.name)
+        }
+        table style="border: 1px solid black;" {
+            @for expr in rows {
+                tr style="border: 1px solid black;" {
+                    td style="border: 1px solid black;" {
+                        code {
+                            (expr)
+                        }
+                    }
+                    @let matches = db.get_issue_ids_by_tag(&db.get_tags_by_expr(&expr)?)?;
+                    td style="border: 1px solid black;" {
+                        @for i in matches.iter().flat_map(|(_, ids)| ids.iter()) {
+                            code {
+                                (i)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 /// Render an HTML report for [Database] info
-pub fn render(db: &Database, tz: UtcOffset) -> Result<Markup> {
+pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup> {
     Ok(html! {
         (DOCTYPE)
         html lang="en" {
@@ -354,6 +338,9 @@ pub fn render(db: &Database, tz: UtcOffset) -> Result<Markup> {
                     "Job Status"
                 }
                 (render_stats(db)?)
+                @for view in views {
+                    (render_view(view, db)?)
+                }
                 @for job in db.get_all_jobs()? {
                     (render_job(&job, db, tz)?)
                 }

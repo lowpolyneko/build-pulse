@@ -22,9 +22,11 @@ use crate::{
 
 mod api;
 mod config;
+#[macro_use]
 mod db;
 mod page;
 mod parse;
+mod tag_expr;
 
 /// CLI arguments
 #[derive(Parser, Debug)]
@@ -190,7 +192,7 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
     runs.iter()
         .filter_map(|r| db.lock().unwrap().get_issues(r).ok())
         .flatten()
-        .filter_map(|(i, s)| match s {
+        .filter_map(|(i, s)| match s.severity {
             Severity::Metadata => None,
             _ => Some(i),
         })
@@ -317,8 +319,12 @@ fn main() -> Result<()> {
     if let Some(output) = args.output {
         info!("Generating report...");
 
-        let markup =
-            page::render(&database, UtcOffset::from_hms(config.timezone, 0, 0)?)?.into_string();
+        let markup = page::render(
+            &database,
+            &config.view,
+            UtcOffset::from_hms(config.timezone, 0, 0)?,
+        )?
+        .into_string();
 
         if let Some(filepath) = output {
             fs::write(&filepath, markup)?;
