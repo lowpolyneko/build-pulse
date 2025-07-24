@@ -3,10 +3,11 @@ use std::{
     collections::HashMap,
     hash::Hash,
     ops::{Deref, DerefMut},
+    rc::Rc,
 };
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Error, Result, params_from_iter};
+use rusqlite::{Connection, Error, Result, params_from_iter, types::Value};
 use serde_json::{from_value, to_value};
 
 use crate::{
@@ -228,6 +229,9 @@ impl Database {
 
         // try to open existing, otherwise create a new one
         let conn = Connection::open(path)?;
+
+        // Enable rarray
+        rusqlite::vtab::array::load_module(&conn)?;
 
         // create the necessary tables
         conn.execute_batch(
@@ -701,23 +705,28 @@ impl Database {
             .prepare_cached(
                 "
                 SELECT tags.id, name, desc, field, severity, issues.id FROM tags
-                JOIN issues ON issues.tag_id IN ?
+                JOIN issues ON issues.tag_id IN rarray(?)
                 ",
             )?
-            .query_map(params_from_iter(tags.iter().map(|t| t.id)), |row| {
-                Ok((
-                    InDatabase::new(
-                        row.get(0)?,
-                        TagInfo {
-                            name: row.get(1)?,
-                            desc: row.get(2)?,
-                            field: read_value!(row, 3),
-                            severity: read_value!(row, 4),
-                        },
-                    ),
-                    row.get(5)?,
-                ))
-            })?
+            .query_map(
+                [Rc::new(
+                    tags.iter().map(|t| Value::from(t.id)).collect::<Vec<_>>(),
+                )],
+                |row| {
+                    Ok((
+                        InDatabase::new(
+                            row.get(0)?,
+                            TagInfo {
+                                name: row.get(1)?,
+                                desc: row.get(2)?,
+                                field: read_value!(row, 3),
+                                severity: read_value!(row, 4),
+                            },
+                        ),
+                        row.get(5)?,
+                    ))
+                },
+            )?
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .for_each(|(tag, id)| {
