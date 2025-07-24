@@ -129,21 +129,21 @@ impl TagExpr {
                 TagExpr::Not(e) => {
                     let (expr, params) = to_where_expr(e)?;
 
-                    Ok((format!("NOT {expr}"), params))
+                    Ok((format!("NOT ({expr})"), params))
                 }
                 TagExpr::And(l, r) => {
                     let (l_expr, mut l_params) = to_where_expr(l)?;
                     let (r_expr, mut r_params) = to_where_expr(r)?;
                     l_params.append(&mut r_params);
 
-                    Ok((format!("{l_expr} AND {r_expr}"), l_params))
+                    Ok((format!("({l_expr}) AND ({r_expr})"), l_params))
                 }
                 TagExpr::Or(l, r) => {
                     let (l_expr, mut l_params) = to_where_expr(l)?;
                     let (r_expr, mut r_params) = to_where_expr(r)?;
                     l_params.append(&mut r_params);
 
-                    Ok((format!("{l_expr} OR {r_expr}"), l_params))
+                    Ok((format!("({l_expr}) OR ({r_expr})"), l_params))
                 }
                 TagExpr::Tag(p) => Ok((
                     "name REGEXP ?".into(),
@@ -161,8 +161,7 @@ impl TagExpr {
         Ok((
             format!(
                 "
-                SELECT id, name, desc, field, severity, issues.id, FROM tags
-                JOIN issues ON issues.tag_id = tags.id
+                SELECT id, name, desc, field, severity FROM tags
                 WHERE
                 {where_expr}
                 "
