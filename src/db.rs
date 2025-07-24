@@ -884,8 +884,7 @@ impl Database {
                 "
                 SELECT COUNT(*) FROM jobs j
                 WHERE EXISTS (
-                    SELECT 1 FROM runs
-                    JOIN builds ON runs.build_id = builds.id
+                    SELECT 1 FROM builds
                     WHERE builds.job_id = j.id
                     AND status = ?
                 )
