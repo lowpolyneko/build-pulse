@@ -256,24 +256,50 @@ fn render_stats(db: &Database) -> Result<Markup> {
                 }
             }
         }
-
-        b {
-            (stats.issues_found)
-            " issues found!"
-            br;
-            (stats.unknown_issues)
-            " runs with unknown issues!"
+        br;
+        table style="border: 1px solid black;" {
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    b {
+                        "Issues Found"
+                    }
+                }
+                td style="border: 1px solid black;" {
+                    b {
+                        (stats.issues_found)
+                        " issues"
+                    }
+                }
+            }
+            tr style="border: 1px solid black;" {
+                td style="border: 1px solid black;" {
+                    b {
+                        "Unknown Issues"
+                    }
+                }
+                td style="border: 1px solid black;" {
+                    b {
+                        (stats.unknown_runs)
+                        " runs"
+                    }
+                }
+            }
         }
+    })
+}
 
+/// Render [crate::db::Similarity]
+fn render_similarities(db: &Database) -> Result<Markup> {
+    Ok(html! {
         h4 {
             "Related Issues"
         }
         table style="border: 1px solid black;" {
-            @for (name, desc, group) in db.get_similarities()? {
+            @for s in db.get_similarities()? {
                 tr style="border: 1px solid black;" {
                     td style="border: 1px solid black;" {
-                        code title=(desc) {
-                            (name)
+                        code title=(s.tag.desc) {
+                            (s.tag.name)
                         }
                     }
                     td style="border: 1px solid black;" {
@@ -282,9 +308,12 @@ fn render_stats(db: &Database) -> Result<Markup> {
                                 "Run Names"
                             }
                             ul {
-                                @for display_name in group {
+                                @for name in s
+                                        .related
+                                        .iter()
+                                        .map(|id| db.get_run_display_name(*id)) {
                                     li {
-                                        (display_name)
+                                        (name?)
                                     }
                                 }
                             }
@@ -329,12 +358,13 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
                                 summary {
                                     "Run Names"
                                 }
-                                p {
-                                    @for i in matches {
-                                        code {
-                                            (i)
+                                ul {
+                                    @for name in matches
+                                            .iter()
+                                            .map(|id| db.get_run_display_name(*id)) {
+                                        li {
+                                            (name?)
                                         }
-                                        ", "
                                     }
                                 }
                             }
@@ -362,6 +392,7 @@ pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup>
                     "Job Status"
                 }
                 (render_stats(db)?)
+                (render_similarities(db)?)
                 @for view in views {
                     (render_view(view, db)?)
                 }
