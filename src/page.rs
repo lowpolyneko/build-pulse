@@ -83,7 +83,7 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
                 }
             }
             @if let Some(runs) = sorted_runs {
-                details open[matches!(build.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
+                details open[matches!(build.status, Some(BuildStatus::Failure))] {
                     summary {
                         "Run Information"
                     }
