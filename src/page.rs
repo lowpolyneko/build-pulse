@@ -196,8 +196,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Failures"
                 }
                 td style="border: 1px solid black;" {
-                    (stats.failures)
-                    " runs"
+                    (render_run_ids(&stats.failures, db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -205,8 +204,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Unstable"
                 }
                 td style="border: 1px solid black;" {
-                    (stats.unstable)
-                    " runs"
+                    (render_run_ids(&stats.unstable, db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -214,8 +212,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Healthy"
                 }
                 td style="border: 1px solid black;" {
-                    (stats.successful)
-                    " runs"
+                    (render_run_ids(&stats.successful, db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -223,8 +220,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Aborted"
                 }
                 td style="border: 1px solid black;" {
-                    (stats.aborted)
-                    " runs"
+                    (render_run_ids(&stats.aborted, db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -232,8 +228,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Not Built"
                 }
                 td style="border: 1px solid black;" {
-                    (stats.not_built)
-                    " runs"
+                    (render_run_ids(&stats.not_built, db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -244,11 +239,11 @@ fn render_stats(db: &Database) -> Result<Markup> {
                 }
                 td style="border: 1px solid black;" {
                     b {
-                        (stats.successful
-                         + stats.failures
-                         + stats.unstable
-                         + stats.aborted
-                         + stats.not_built)
+                        (stats.successful.len()
+                         + stats.failures.len()
+                         + stats.unstable.len()
+                         + stats.aborted.len()
+                         + stats.not_built.len())
                         " runs"
                     }
                 }
@@ -277,8 +272,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                 }
                 td style="border: 1px solid black;" {
                     b {
-                        (stats.unknown_runs)
-                        " runs"
+                        (render_run_ids(&stats.unknown_runs, db)?)
                     }
                 }
             }
@@ -310,20 +304,7 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                         }
                     }
                     td style="border: 1px solid black;" {
-                        details {
-                            summary {
-                                "Run Names"
-                            }
-                            ul {
-                                @for id in s.related {
-                                    li {
-                                        a href={"#" (id)} {
-                                            (db.get_run_display_name(id)?)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        (render_run_ids(&s.related, db)?)
                     }
                 }
             }
@@ -356,28 +337,35 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
                             }
                         }
                         td style="border: 1px solid black;" {
-                                    (matches.len())
-                                    " runs"
+                            (render_run_ids(&matches, db)?)
                         }
-                        td style="border: 1px solid black;" {
-                            details {
-                                summary {
-                                    "Run Names"
-                                }
-                                ul {
-                                    @for id in matches {
-                                        li {
-                                            a href={"#" (id)} {
-                                                (db.get_run_display_name(id)?)
-                                            }
-                                        }
-                                    }
-                                }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn render_run_ids(ids: &[i64], db: &Database) -> Result<Markup> {
+    Ok(html! {
+        @if !ids.is_empty() {
+            details {
+                summary {
+                    (ids.len())
+                    " runs"
+                }
+                ul {
+                    @for id in ids {
+                        li {
+                            a href={"#" (id)} {
+                                (db.get_run_display_name(*id)?)
                             }
                         }
                     }
                 }
             }
+        } @else {
+            "0 runs"
         }
     })
 }
