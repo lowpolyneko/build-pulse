@@ -149,11 +149,25 @@ impl TagExpr {
                     Ok((format!("({l_expr}) OR ({r_expr})"), l_params))
                 }
                 TagExpr::Tag(p) => Ok((
-                    "name REGEXP ?".into(),
+                    "
+                    EXISTS (
+                        SELECT 1 FROM issues
+                        JOIN tags ON tags.id = issues.tag_id
+                        WHERE issues.run_id = runs.id AND tags.name REGEXP ?
+                    )
+                    "
+                    .into(),
                     vec![Box::new(p.as_str().to_owned())],
                 )),
                 TagExpr::Severity(s) => Ok((
-                    "severity = ?".into(),
+                    "
+                    EXISTS (
+                        SELECT 1 FROM issues
+                        JOIN tags ON tags.id = issues.tag_id
+                        WHERE issues.run_id = runs.id AND tags.severity = ?
+                    )
+                    "
+                    .into(),
                     vec![Box::new(to_value(s).map_err(|_| Error::InvalidQuery)?)],
                 )),
                 _ => Err(Error::InvalidQuery),
@@ -164,7 +178,7 @@ impl TagExpr {
         Ok((
             format!(
                 "
-                SELECT id, name, desc, field, severity FROM tags
+                SELECT DISTINCT runs.id FROM runs
                 WHERE
                 {where_expr}
                 "

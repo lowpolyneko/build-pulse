@@ -132,15 +132,19 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
             td style="border: 1px solid black;" { // issues
                 @if let Ok(issues) = db.get_issues(run) {
                     @if !issues.is_empty() {
-                        b {
-                            "Identified Tags: "
-                        }
-                        @if let Ok(tags) = db.get_tags_from_run(run) {
+                        @if let Ok(tags) = db.get_tags_by_run(run) {
+                            b {
+                                "Identified Tags: "
+                            }
                             @for t in tags {
                                 code title=(t.desc) {
                                     (t.name)
                                     ", "
                                 }
+                            }
+                        } @else {
+                            b {
+                                "Unknown issue(s)!"
                             }
                         }
                         hr;
@@ -256,6 +260,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
         b {
             (stats.issues_found)
             " issues found!"
+            br;
             (stats.unknown_issues)
             " runs with unknown issues!"
         }
@@ -302,17 +307,26 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
         }
         table style="border: 1px solid black;" {
             @for expr in rows {
-                tr style="border: 1px solid black;" {
-                    td style="border: 1px solid black;" {
-                        code {
-                            (expr)
-                        }
-                    }
-                    @let matches = db.get_issue_ids_by_tag(&db.get_tags_by_expr(&expr)?)?;
-                    td style="border: 1px solid black;" {
-                        @for i in matches.iter().flat_map(|(_, ids)| ids.iter()) {
+                @let matches = db.get_run_ids_by_expr(&expr)?;
+                @if !matches.is_empty() {
+                    tr style="border: 1px solid black;" {
+                        td style="border: 1px solid black;" {
                             code {
-                                (i)
+                                (expr)
+                            }
+                        }
+                        td style="border: 1px solid black;" {
+                                    (matches.len())
+                                    " runs"
+                        }
+                        td style="border: 1px solid black;" {
+                            p {
+                                @for i in matches {
+                                    code {
+                                        (i)
+                                    }
+                                    ", "
+                                }
                             }
                         }
                     }
@@ -341,7 +355,7 @@ pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup>
                 @for view in views {
                     (render_view(view, db)?)
                 }
-                @for job in db.get_all_jobs()? {
+                @for job in db.get_jobs()? {
                     (render_job(&job, db, tz)?)
                 }
                 p {
