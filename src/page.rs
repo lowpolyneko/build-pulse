@@ -142,10 +142,6 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                                     ", "
                                 }
                             }
-                        } @else {
-                            b {
-                                "Unknown issue(s)!"
-                            }
                         }
                         hr;
                         @for i in issues {
@@ -160,6 +156,11 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                             }
                             hr;
                         }
+                    } @else if matches!(run.status, Some(BuildStatus::Failure)) {
+                        b {
+                            "Unknown issue(s)!"
+                        }
+                        hr;
                     }
                 }
                 a href=(format!("{}/consoleFull", run.url)) {
