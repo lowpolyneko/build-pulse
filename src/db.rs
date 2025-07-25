@@ -7,7 +7,7 @@ use std::{
 };
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Error, Result, params_from_iter, types::Value};
+use rusqlite::{Connection, Error, Result, types::Value};
 use serde_json::{from_value, to_value};
 
 use crate::{
