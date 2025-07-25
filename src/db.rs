@@ -106,6 +106,12 @@ pub struct Issue<'a> {
 /// Statistics of [Issue]s and [Run]s in [Database]
 #[derive(Default)]
 pub struct Statistics {
+    /// Number of [BuildStatus::Failure] [Job]s
+    pub failed_jobs: u64,
+
+    /// Total number of tracked [Job]s
+    pub total_jobs: u64,
+
     /// Successful [Run]s
     pub successful: u64,
 
@@ -121,17 +127,17 @@ pub struct Statistics {
     /// Not built [Run]s
     pub not_built: u64,
 
-    /// Number of [BuildStatus::Failure] [Job]s
-    pub failed_jobs: u64,
-
-    /// Total number of tracked [Job]s
-    pub total_jobs: u64,
-
-    /// [Run]s with unknown issues
-    pub unknown_issues: u64,
-
     /// Total [Issue]s found
     pub issues_found: u64,
+
+    /// [Run]s with unknown issues
+    pub unknown_runs: u64,
+}
+
+/// List of similar [Run]s by [TagInfo] in [Database]
+pub struct Similarity {
+    pub tag: InDatabase<TagInfo>,
+    pub related: Vec<i64>,
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -573,15 +579,6 @@ impl Database {
             })
     }
 
-    /// Get all [Run] IDs by [TagExpr] in [Database]
-    pub fn get_run_ids_by_expr(&self, expr: &TagExpr) -> Result<Vec<i64>> {
-        let (stmt, params) = expr.to_sql_select()?;
-        self.conn
-            .prepare(&stmt)?
-            .query_map(params, |row| row.get(0))?
-            .collect::<Result<Vec<_>>>()
-    }
-
     /// Get all [Run]s from [Database]
     pub fn get_runs(&self) -> Result<Vec<InDatabase<Run>>> {
         self.conn
@@ -644,6 +641,21 @@ impl Database {
                 ))
             })?
             .collect()
+    }
+
+    pub fn get_run_display_name(&self, id: i64) -> Result<String> {
+        self.conn
+            .prepare_cached("SELECT display_name FROM runs WHERE id = ?")?
+            .query_one((id,), |row| row.get(0))
+    }
+
+    /// Get all [Run] IDs by [TagExpr] in [Database]
+    pub fn get_run_ids_by_expr(&self, expr: &TagExpr) -> Result<Vec<i64>> {
+        let (stmt, params) = expr.to_sql_select()?;
+        self.conn
+            .prepare(&stmt)?
+            .query_map(params, |row| row.get(0))?
+            .collect::<Result<Vec<_>>>()
     }
 
     /// Get all [Issue]s from [Database]
@@ -777,32 +789,32 @@ impl Database {
     }
 
     /// Get all similarities by [Tag] in [Database]
-    pub fn get_similarities(&self) -> Result<Vec<(String, String, Vec<String>)>> {
-        let mut hm: HashMap<u64, (String, String, Vec<String>)> = HashMap::new();
+    pub fn get_similarities(&self) -> Result<Vec<Similarity>> {
+        let mut hm: HashMap<u64, Similarity> = HashMap::new();
         self.conn
             .prepare_cached(
                 "
-                SELECT DISTINCT similarity_hash, name, desc, display_name FROM similarities
+                SELECT DISTINCT similarity_hash, tag_id, run_id FROM similarities
                 JOIN issues ON issues.id = similarities.issue_id
-                JOIN tags ON tags.id = issues.tag_id
-                JOIN runs ON runs.id = issues.run_id
                 ",
             )?
             .query_map((), |row| {
                 Ok((
                     row.get(0).map(i64::cast_unsigned)?,
-                    row.get(1)?,
+                    self.get_tag(row.get(1)?)?,
                     row.get(2)?,
-                    row.get(3)?,
                 ))
             })?
             .collect::<Result<Vec<_>>>()?
             .into_iter()
-            .for_each(|(hash, name, desc, id)| {
+            .for_each(|(hash, tag, run_id)| {
                 hm.entry(hash)
-                    .or_insert((name, desc, Vec::new()))
-                    .2
-                    .push(id)
+                    .or_insert(Similarity {
+                        tag: tag,
+                        related: Vec::new(),
+                    })
+                    .related
+                    .push(run_id)
             });
 
         Ok(hm.into_values().collect())
@@ -851,7 +863,19 @@ impl Database {
             .prepare("SELECT COUNT(*) FROM jobs")?
             .query_one((), |row| row.get(0))?;
 
-        stats.unknown_issues = self
+        // don't count metadata issues in total
+        stats.issues_found = self
+            .conn
+            .prepare(
+                "
+                SELECT COUNT(*) FROM issues
+                JOIN tags ON tags.id = issues.tag_id
+                WHERE tags.severity != ?
+                ",
+            )?
+            .query_one((write_value!(Severity::Metadata),), |row| row.get(0))?;
+
+        stats.unknown_runs = self
             .conn
             .prepare(
                 "
@@ -873,18 +897,6 @@ impl Database {
                 ),
                 |row| row.get(0),
             )?;
-
-        // don't count metadata issues in total
-        stats.issues_found = self
-            .conn
-            .prepare(
-                "
-                SELECT COUNT(*) FROM issues
-                JOIN tags ON tags.id = issues.tag_id
-                WHERE tags.severity != ?
-                ",
-            )?
-            .query_one((write_value!(Severity::Metadata),), |row| row.get(0))?;
 
         Ok(stats)
     }
