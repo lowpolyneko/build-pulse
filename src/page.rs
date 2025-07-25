@@ -277,10 +277,15 @@ fn render_stats(db: &Database) -> Result<Markup> {
                         }
                     }
                     td style="border: 1px solid black;" {
-                        ul {
-                            @for display_name in group {
-                                li {
-                                    (display_name)
+                        details {
+                            summary {
+                                "Run Names"
+                            }
+                            ul {
+                                @for display_name in group {
+                                    li {
+                                        (display_name)
+                                    }
                                 }
                             }
                         }
@@ -320,12 +325,17 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
                                     " runs"
                         }
                         td style="border: 1px solid black;" {
-                            p {
-                                @for i in matches {
-                                    code {
-                                        (i)
+                            details {
+                                summary {
+                                    "Run Names"
+                                }
+                                p {
+                                    @for i in matches {
+                                        code {
+                                            (i)
+                                        }
+                                        ", "
                                     }
-                                    ", "
                                 }
                             }
                         }
