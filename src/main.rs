@@ -99,7 +99,7 @@ fn pull_build_logs(
             Err(e) => Err(e),
         })
         .filter_map(|res| match res {
-            Ok((db_job, db_build, mb)) => match db.lock().unwrap().get_run(&mb.url) {
+            Ok((db_job, db_build, mb)) => match db.lock().unwrap().get_run_by_url(&mb.url) {
                 Ok(_) => None, // cached
                 Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, db_build, mb))),
                 Err(e) => Some(Err(Error::from(e))),
@@ -190,12 +190,8 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<InDatabase<Issue>>> = Vec::new();
     runs.iter()
-        .filter_map(|r| db.lock().unwrap().get_issues(r).ok())
+        .filter_map(|r| db.lock().unwrap().get_issues(r, false).ok())
         .flatten()
-        .filter_map(|(i, s)| match s.severity {
-            Severity::Metadata => None,
-            _ => Some(i),
-        })
         .for_each(|i| {
             match groups.par_iter_mut().find_any(|g| {
                 g.par_iter()

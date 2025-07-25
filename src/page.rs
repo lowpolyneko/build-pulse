@@ -8,7 +8,7 @@ use rayon::slice::ParallelSliceMut;
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
-    config::{Severity, TagView},
+    config::TagView,
     db::{Database, InDatabase, Job, Run},
     tag_expr::TagExpr,
 };
@@ -130,7 +130,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 }
             }
             td style="border: 1px solid black;" { // issues
-                @if let Ok(issues) = db.get_issues(run) {
+                @if let Ok(issues) = db.get_issues(run, false) {
                     @if !issues.is_empty() {
                         @if let Ok(tags) = db.get_tags_by_run(run) {
                             b {
@@ -148,19 +148,17 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                             }
                         }
                         hr;
-                        @for (i, s) in issues {
-                            @if !matches!(s.severity, Severity::Metadata) {
-                                pre {
-                                    (i.snippet)
-                                }
-                                @if i.duplicates > 0 {
-                                    b {
-                                        (i.duplicates)
-                                        " duplicate emits"
-                                    }
-                                }
-                                hr;
+                        @for i in issues {
+                            pre {
+                                (i.snippet)
                             }
+                            @if i.duplicates > 0 {
+                                b {
+                                    (i.duplicates)
+                                    " duplicate emits"
+                                }
+                            }
+                            hr;
                         }
                     }
                 }
@@ -296,10 +294,19 @@ fn render_similarities(db: &Database) -> Result<Markup> {
         }
         table style="border: 1px solid black;" {
             @for s in db.get_similarities()? {
-                tr style="border: 1px solid black;" {
+                tr style="border: 1px solid black; background-color: lightgray" {
                     td style="border: 1px solid black;" {
                         code title=(s.tag.desc) {
                             (s.tag.name)
+                        }
+                    }
+                    td style="border: 1px solid black;" {
+                        b {
+                            "Example Snippet"
+                        }
+                        hr;
+                        pre {
+                            (s.example)
                         }
                     }
                     td style="border: 1px solid black;" {
