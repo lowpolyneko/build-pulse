@@ -111,7 +111,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
         _ => "border: 1px solid black;",
     };
     html! {
-        tr style=(row_border) {
+        tr #(run.id) style=(row_border) {
             td style="border: 1px solid black;" { // status
                 b {
                     @match run.status {
@@ -315,12 +315,11 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                                 "Run Names"
                             }
                             ul {
-                                @for name in s
-                                        .related
-                                        .iter()
-                                        .map(|id| db.get_run_display_name(*id)) {
+                                @for id in s.related {
                                     li {
-                                        (name?)
+                                        a href={"#" (id)} {
+                                            (db.get_run_display_name(id)?)
+                                        }
                                     }
                                 }
                             }
@@ -366,11 +365,11 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
                                     "Run Names"
                                 }
                                 ul {
-                                    @for name in matches
-                                            .iter()
-                                            .map(|id| db.get_run_display_name(*id)) {
+                                    @for id in matches {
                                         li {
-                                            (name?)
+                                            a href={"#" (id)} {
+                                                (db.get_run_display_name(id)?)
+                                            }
                                         }
                                     }
                                 }
