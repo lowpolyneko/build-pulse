@@ -27,7 +27,7 @@ expr = 'S"Metadata"'
 
 [[view]]
 name = "Jenkins Failures By Platform"
-expr = 'T"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|(softiron-[0-9]+)" && jenkins_agent_offline'
+expr = 'T"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|(softiron-[0-9]+)" && t"jenkins_agent_offline"'
 
 ### FATAL TOOLING EMITS
 ### ----------------------------------------------------------------------

@@ -20,11 +20,11 @@ pub enum TagExpr {
 }
 
 impl TagExpr {
-    pub fn parse(expr: &str) -> Result<Self, Vec<Cheap>> {
-        let tag_pattern = none_of::<_, _, extra::Err<Cheap>>('"')
+    pub fn parse(expr: &'_ str) -> Result<Self, Vec<Rich<'_, char>>> {
+        let tag_pattern = none_of::<_, _, extra::Err<Rich<char>>>('"')
             .repeated()
             .to_slice()
-            .try_map(|p, span| Regex::new(p).map_err(|_| Cheap::new(span)))
+            .try_map(|p, span| Regex::new(p).map_err(|e| Rich::custom(span, e)))
             .delimited_by(just('"'), just('"'));
         let severity_const = none_of('"')
             .repeated()
@@ -32,7 +32,10 @@ impl TagExpr {
             .try_map(|s, span| {
                 Severity::iter()
                     .find(|e| e.to_string() == s)
-                    .ok_or(Cheap::new(span))
+                    .ok_or(Rich::custom(
+                        span,
+                        "Failed to parse Severity as enum variant!",
+                    ))
             })
             .delimited_by(just('"'), just('"'));
 
