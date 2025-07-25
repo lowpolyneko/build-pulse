@@ -47,22 +47,27 @@ impl TagExpr {
         let tag = just("t").ignore_then(tag_pattern).map(TagExpr::Tag);
         let severity = just("s").ignore_then(severity_const).map(TagExpr::Severity);
 
-        let not = just('!').padded();
-        let and = just("&&").padded();
-        let or = just("||").padded();
-
-        choice((tag_set, severity_set, tag, severity))
+        recursive(|atom| {
+            choice((
+                atom.delimited_by(just('('), just(')')),
+                tag_set,
+                severity_set,
+                tag,
+                severity,
+            ))
+            .padded()
             .pratt((
-                prefix(2, not, |_, e, _| TagExpr::Not(Box::new(e))),
-                infix(left(1), and, |l, _, r, _| {
+                prefix(2, just('!'), |_, e, _| TagExpr::Not(Box::new(e))),
+                infix(left(1), just("&&"), |l, _, r, _| {
                     TagExpr::And(Box::new(l), Box::new(r))
                 }),
-                infix(left(0), or, |l, _, r, _| {
+                infix(left(0), just("||"), |l, _, r, _| {
                     TagExpr::Or(Box::new(l), Box::new(r))
                 }),
             ))
-            .parse(expr)
-            .into_result()
+        })
+        .parse(expr)
+        .into_result()
     }
 
     pub fn eval_rows<T: Deref<Target = TagInfo>>(self, tags: &[T]) -> Vec<TagExpr> {
