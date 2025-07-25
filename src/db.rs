@@ -229,9 +229,6 @@ impl Database {
         // try to open existing, otherwise create a new one
         let conn = Connection::open(path)?;
 
-        // Enable rarray
-        rusqlite::vtab::array::load_module(&conn)?;
-
         // create the necessary tables
         conn.execute_batch(
             "
