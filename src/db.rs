@@ -6,7 +6,7 @@ use std::{
 };
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, Row};
 use serde_json::{from_value, to_value};
 
 use crate::{
@@ -138,6 +138,7 @@ pub struct Statistics {
 pub struct Similarity {
     pub tag: InDatabase<TagInfo>,
     pub related: Vec<i64>,
+    pub example: String,
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -353,7 +354,7 @@ impl Database {
                 run.build_id,
             ))?;
 
-        self.get_run(&run.url)
+        self.get_run_by_url(&run.url)
     }
 
     /// Upsert a [JobBuild] into [Database]
@@ -549,7 +550,38 @@ impl Database {
     }
 
     /// Get a [Run] from [Database]
-    pub fn get_run(&self, url: &str) -> Result<InDatabase<Run>> {
+    pub fn get_run(&self, id: i64) -> Result<InDatabase<Run>> {
+        self.conn
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    url,
+                    status,
+                    display_name,
+                    log,
+                    tag_schema,
+                    build_id
+                FROM runs WHERE id = ?
+                ",
+            )?
+            .query_one((id,), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Run {
+                        url: row.get(1)?,
+                        status: read_value!(row, 2),
+                        display_name: row.get(3)?,
+                        log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        build_id: row.get(6)?,
+                    },
+                ))
+            })
+    }
+
+    /// Get a [Run] from [Database] by url
+    pub fn get_run_by_url(&self, url: &str) -> Result<InDatabase<Run>> {
         self.conn
             .prepare_cached(
                 "
@@ -655,14 +687,15 @@ impl Database {
         self.conn
             .prepare(&stmt)?
             .query_map(params, |row| row.get(0))?
-            .collect::<Result<Vec<_>>>()
+            .collect()
     }
 
-    /// Get all [Issue]s from [Database]
-    pub fn get_issues<'a>(
+    /// Get an [Issue] from [Database]
+    pub fn get_issue<'a>(
         &self,
         run: &'a InDatabase<Run>,
-    ) -> Result<Vec<(InDatabase<Issue<'a>>, InDatabase<TagInfo>)>> {
+        id: i64,
+    ) -> Result<InDatabase<Issue<'a>>> {
         self.conn
             .prepare_cached(
                 "
@@ -672,44 +705,92 @@ impl Database {
                     snippet_end,
                     tag_id,
                     duplicates,
-                    name,
-                    desc,
-                    field,
-                    severity
+                    field
                 FROM issues
                 JOIN tags ON tags.id = issues.tag_id
                 WHERE issues.run_id = ?
+                AND issues.id = ?
                 ",
             )?
-            .query_map((run.id,), |row| {
-                let field = read_value!(row, 7);
-                Ok((
-                    InDatabase::new(
-                        row.get(0)?,
-                        Issue {
-                            snippet: &match field {
-                                Field::Console => run
-                                    .log
-                                    .as_ref()
-                                    .expect("Issue references non-existent log!"),
-                                Field::RunName => &run.display_name,
-                            }[row.get(1)?..row.get(2)?],
-                            tag: row.get(3)?,
-                            duplicates: row.get(4).map(i64::cast_unsigned)?,
-                        },
-                    ),
-                    InDatabase::new(
-                        row.get(3)?,
-                        TagInfo {
-                            name: row.get(5)?,
-                            desc: row.get(6)?,
-                            field,
-                            severity: read_value!(row, 8),
-                        },
-                    ),
+            .query_one((run.id, id), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Issue {
+                        snippet: &match read_value!(row, 5) {
+                            Field::Console => run
+                                .log
+                                .as_ref()
+                                .expect("Issue references non-existent log!"),
+                            Field::RunName => &run.display_name,
+                        }[row.get(1)?..row.get(2)?],
+                        tag: row.get(3)?,
+                        duplicates: row.get(4).map(i64::cast_unsigned)?,
+                    },
                 ))
-            })?
-            .collect()
+            })
+    }
+
+    /// Get all [Issue]s from [Database]
+    pub fn get_issues<'a>(
+        &self,
+        run: &'a InDatabase<Run>,
+        include_metadata: bool,
+    ) -> Result<Vec<InDatabase<Issue<'a>>>> {
+        let closure = |row: &Row| {
+            Ok(InDatabase::new(
+                row.get(0)?,
+                Issue {
+                    snippet: &match read_value!(row, 5) {
+                        Field::Console => run
+                            .log
+                            .as_ref()
+                            .expect("Issue references non-existent log!"),
+                        Field::RunName => &run.display_name,
+                    }[row.get(1)?..row.get(2)?],
+                    tag: row.get(3)?,
+                    duplicates: row.get(4).map(i64::cast_unsigned)?,
+                },
+            ))
+        };
+
+        if include_metadata {
+            self.conn
+                .prepare_cached(
+                    "
+                    SELECT
+                        issues.id,
+                        snippet_start,
+                        snippet_end,
+                        tag_id,
+                        duplicates,
+                        field
+                    FROM issues
+                    JOIN tags ON tags.id = issues.tag_id
+                    WHERE issues.run_id = ?
+                    ",
+                )?
+                .query_map((run.id,), closure)?
+                .collect()
+        } else {
+            self.conn
+                .prepare_cached(
+                    "
+                    SELECT
+                        issues.id,
+                        snippet_start,
+                        snippet_end,
+                        tag_id,
+                        duplicates,
+                        field
+                    FROM issues
+                    JOIN tags ON tags.id = issues.tag_id
+                    WHERE issues.run_id = ?
+                    AND tags.severity != ?
+                    ",
+                )?
+                .query_map((run.id, write_value!(Severity::Metadata)), closure)?
+                .collect()
+        }
     }
 
     /// Get a [Tag]'s [TagInfo] from [Database]
@@ -794,7 +875,12 @@ impl Database {
         self.conn
             .prepare_cached(
                 "
-                SELECT DISTINCT similarity_hash, tag_id, run_id FROM similarities
+                SELECT DISTINCT
+                    similarity_hash,
+                    tag_id,
+                    run_id,
+                    issue_id
+                FROM similarities
                 JOIN issues ON issues.id = similarities.issue_id
                 ",
             )?
@@ -803,19 +889,28 @@ impl Database {
                     row.get(0).map(i64::cast_unsigned)?,
                     self.get_tag(row.get(1)?)?,
                     row.get(2)?,
+                    row.get(3)?,
                 ))
             })?
             .collect::<Result<Vec<_>>>()?
             .into_iter()
-            .for_each(|(hash, tag, run_id)| {
+            .try_for_each(|(hash, tag, run_id, issue_id)| {
                 hm.entry(hash)
-                    .or_insert(Similarity {
-                        tag: tag,
-                        related: Vec::new(),
+                    .or_insert({
+                        Similarity {
+                            tag,
+                            related: Vec::new(),
+                            example: self
+                                .get_issue(&self.get_run(run_id)?, issue_id)?
+                                .snippet
+                                .to_owned(),
+                        }
                     })
                     .related
-                    .push(run_id)
-            });
+                    .push(run_id);
+
+                Ok::<_, Error>(())
+            })?;
 
         Ok(hm.into_values().collect())
     }
