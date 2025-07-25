@@ -181,9 +181,9 @@ fn render_stats(db: &Database) -> Result<Markup> {
         }
         p {
             "Overall Job Health:"
-            progress value=(stats.failed_jobs) max=(stats.total_jobs) {}
+            progress value=(stats.successful_jobs) max=(stats.total_jobs) {}
             br;
-            (stats.failed_jobs)
+            (stats.successful_jobs)
             " out of "
             (stats.total_jobs)
             " jobs successful."

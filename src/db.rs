@@ -106,8 +106,8 @@ pub struct Issue<'a> {
 /// Statistics of [Issue]s and [Run]s in [Database]
 #[derive(Default)]
 pub struct Statistics {
-    /// Number of [BuildStatus::Failure] [Job]s
-    pub failed_jobs: u64,
+    /// Number of [BuildStatus::Success] [Job]s
+    pub successful_jobs: u64,
 
     /// Total number of tracked [Job]s
     pub total_jobs: u64,
@@ -842,7 +842,7 @@ impl Database {
                 stats
             });
 
-        stats.failed_jobs = self
+        stats.successful_jobs = self
             .conn
             .prepare(
                 "
@@ -854,7 +854,7 @@ impl Database {
                 )
                 ",
             )?
-            .query_one((write_value!(Some(BuildStatus::Failure)),), |row| {
+            .query_one((write_value!(Some(BuildStatus::Success)),), |row| {
                 row.get(0)
             })?;
 
