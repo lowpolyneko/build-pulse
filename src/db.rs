@@ -113,25 +113,25 @@ pub struct Statistics {
     pub total_jobs: u64,
 
     /// Successful [Run]s
-    pub successful: u64,
+    pub successful: Vec<i64>,
 
     /// Unstable [Run]s
-    pub unstable: u64,
+    pub unstable: Vec<i64>,
 
     /// Failed [Run]s
-    pub failures: u64,
+    pub failures: Vec<i64>,
 
     /// Aborted [Run]s
-    pub aborted: u64,
+    pub aborted: Vec<i64>,
 
     /// Not built [Run]s
-    pub not_built: u64,
+    pub not_built: Vec<i64>,
 
     /// Total [Issue]s found
     pub issues_found: u64,
 
     /// [Run]s with unknown issues
-    pub unknown_runs: u64,
+    pub unknown_runs: Vec<i64>,
 }
 
 /// List of similar [Run]s by [TagInfo] in [Database]
@@ -920,22 +920,21 @@ impl Database {
         // calculate success/failures for all runs
         let mut stats = self
             .conn
-            .prepare("SELECT status, COUNT(*) FROM runs GROUP BY status")?
-            .query_map((), |row| Ok((read_value!(row, 0), row.get::<_, u64>(1)?)))?
-            .collect::<Result<Vec<_>>>()?
-            .iter()
-            .fold(Statistics::default(), |mut stats, (status, count)| {
+            .prepare("SELECT status, id FROM runs")?
+            .query_map((), |row| Ok((read_value!(row, 0), row.get(1)?)))?
+            .try_fold(Statistics::default(), |mut stats, res| {
+                let (status, id) = res?;
                 match status {
-                    Some(BuildStatus::Aborted) => stats.aborted += count,
-                    Some(BuildStatus::Failure) => stats.failures += count,
-                    Some(BuildStatus::NotBuilt) => stats.not_built += count,
-                    Some(BuildStatus::Success) => stats.successful += count,
-                    Some(BuildStatus::Unstable) => stats.unstable += count,
+                    Some(BuildStatus::Aborted) => stats.aborted.push(id),
+                    Some(BuildStatus::Failure) => stats.failures.push(id),
+                    Some(BuildStatus::NotBuilt) => stats.not_built.push(id),
+                    Some(BuildStatus::Success) => stats.successful.push(id),
+                    Some(BuildStatus::Unstable) => stats.unstable.push(id),
                     _ => {}
                 };
 
-                stats
-            });
+                Ok::<_, Error>(stats)
+            })?;
 
         stats.successful_jobs = self
             .conn
@@ -974,7 +973,7 @@ impl Database {
             .conn
             .prepare(
                 "
-                SELECT COUNT(*) FROM runs r
+                SELECT r.id FROM runs r
                 WHERE r.status = ?
                     AND NOT EXISTS (
                         SELECT 1 FROM issues
@@ -985,13 +984,14 @@ impl Database {
                     )
                 ",
             )?
-            .query_one(
+            .query_map(
                 (
                     write_value!(Some(BuildStatus::Failure)),
                     write_value!(Severity::Metadata),
                 ),
                 |row| row.get(0),
-            )?;
+            )?
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(stats)
     }
