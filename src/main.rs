@@ -149,7 +149,7 @@ fn pull_build_logs(
 
 /// Parse all untagged runs for `tags` and cache them into database `db`
 fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
-    let runs = db.lock().unwrap().get_all_runs()?;
+    let runs = db.lock().unwrap().get_runs()?;
 
     runs.par_iter()
         .flat_map_iter(|run| Field::iter().map(move |f| (run, f))) // parse all fields
@@ -185,7 +185,7 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
 fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
-    let runs = db.lock().unwrap().get_all_runs()?;
+    let runs = db.lock().unwrap().get_runs()?;
 
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<InDatabase<Issue>>> = Vec::new();

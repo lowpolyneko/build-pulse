@@ -3,11 +3,10 @@ use std::{
     collections::HashMap,
     hash::Hash,
     ops::{Deref, DerefMut},
-    rc::Rc,
 };
 
 use jenkins_api::build::BuildStatus;
-use rusqlite::{Connection, Error, Result, types::Value};
+use rusqlite::{Connection, Error, Result};
 use serde_json::{from_value, to_value};
 
 use crate::{
@@ -492,7 +491,7 @@ impl Database {
     }
 
     /// Get all [Job]s from [Database]
-    pub fn get_all_jobs(&self) -> Result<Vec<InDatabase<Job>>> {
+    pub fn get_jobs(&self) -> Result<Vec<InDatabase<Job>>> {
         self.conn
             .prepare_cached(
                 "
@@ -577,6 +576,47 @@ impl Database {
             })
     }
 
+    /// Get all [Run] IDs by [TagExpr] in [Database]
+    pub fn get_run_ids_by_expr(&self, expr: &TagExpr) -> Result<Vec<i64>> {
+        let (stmt, params) = expr.to_sql_select()?;
+        self.conn
+            .prepare(&stmt)?
+            .query_map(params, |row| row.get(0))?
+            .collect::<Result<Vec<_>>>()
+    }
+
+    /// Get all [Run]s from [Database]
+    pub fn get_runs(&self) -> Result<Vec<InDatabase<Run>>> {
+        self.conn
+            .prepare_cached(
+                "
+                SELECT
+                    id,
+                    url,
+                    status,
+                    display_name,
+                    log,
+                    tag_schema,
+                    build_id
+                FROM runs
+                ",
+            )?
+            .query_map((), |row| {
+                Ok(InDatabase::new(
+                    row.get(0)?,
+                    Run {
+                        url: row.get(1)?,
+                        status: read_value!(row, 2),
+                        display_name: row.get(3)?,
+                        log: row.get(4)?,
+                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
+                        build_id: row.get(6)?,
+                    },
+                ))
+            })?
+            .collect()
+    }
+
     /// Get [Run]s from [Database] by [JobBuild]
     pub fn get_runs_by_build(&self, build: &InDatabase<JobBuild>) -> Result<Vec<InDatabase<Run>>> {
         self.conn
@@ -594,38 +634,6 @@ impl Database {
                 ",
             )?
             .query_map((build.id,), |row| {
-                Ok(InDatabase::new(
-                    row.get(0)?,
-                    Run {
-                        url: row.get(1)?,
-                        status: read_value!(row, 2),
-                        display_name: row.get(3)?,
-                        log: row.get(4)?,
-                        tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
-                        build_id: row.get(6)?,
-                    },
-                ))
-            })?
-            .collect()
-    }
-
-    /// Get all [Run]s from [Database]
-    pub fn get_all_runs(&self) -> Result<Vec<InDatabase<Run>>> {
-        self.conn
-            .prepare_cached(
-                "
-                SELECT
-                    id,
-                    url,
-                    status,
-                    display_name,
-                    log,
-                    tag_schema,
-                    build_id
-                FROM runs
-                ",
-            )?
-            .query_map((), |row| {
                 Ok(InDatabase::new(
                     row.get(0)?,
                     Run {
@@ -695,49 +703,6 @@ impl Database {
             .collect()
     }
 
-    /// Get all [Issue] IDs keyed by all [Tag]s in [Database]
-    pub fn get_issue_ids_by_tag(
-        &self,
-        tags: &[InDatabase<TagInfo>],
-    ) -> Result<HashMap<InDatabase<TagInfo>, Vec<i64>>> {
-        let mut hm = HashMap::new();
-        self.conn
-            .prepare_cached(
-                "
-                SELECT tags.id, name, desc, field, severity, issues.id FROM tags
-                JOIN issues ON issues.tag_id IN rarray(?)
-                ",
-            )?
-            .query_map(
-                [Rc::new(
-                    tags.iter().map(|t| Value::from(t.id)).collect::<Vec<_>>(),
-                )],
-                |row| {
-                    Ok((
-                        InDatabase::new(
-                            row.get(0)?,
-                            TagInfo {
-                                name: row.get(1)?,
-                                desc: row.get(2)?,
-                                field: read_value!(row, 3),
-                                severity: read_value!(row, 4),
-                            },
-                        ),
-                        row.get(5)?,
-                    ))
-                },
-            )?
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .for_each(|(tag, id)| {
-                hm.entry(tag)
-                    .and_modify(|v: &mut Vec<i64>| v.push(id))
-                    .or_insert_with(|| vec![id]);
-            });
-
-        Ok(hm)
-    }
-
     /// Get a [Tag]'s [TagInfo] from [Database]
     pub fn get_tag(&self, id: i64) -> Result<InDatabase<TagInfo>> {
         self.conn
@@ -790,32 +755,13 @@ impl Database {
             .collect()
     }
 
-    /// Get all [TagInfo]s by [TagExpr] in [Database]
-    pub fn get_tags_by_expr(&self, expr: &TagExpr) -> Result<Vec<InDatabase<TagInfo>>> {
-        let (stmt, params) = expr.to_sql_select()?;
-        self.conn
-            .prepare(&stmt)?
-            .query_map(params, |row| {
-                Ok(InDatabase::new(
-                    row.get(0)?,
-                    TagInfo {
-                        name: row.get(1)?,
-                        desc: row.get(2)?,
-                        field: read_value!(row, 3),
-                        severity: read_value!(row, 4),
-                    },
-                ))
-            })?
-            .collect()
-    }
-
     /// Get all [TagInfo]s from [Run]
-    pub fn get_tags_from_run(&self, run: &InDatabase<Run>) -> Result<Vec<InDatabase<TagInfo>>> {
+    pub fn get_tags_by_run(&self, run: &InDatabase<Run>) -> Result<Vec<InDatabase<TagInfo>>> {
         self.conn
             .prepare_cached(
                 "
-                SELECT DISTINCT id, name, desc, field, severity FROM tags
-                JOIN issues ON issues.tag_id = tags.id
+                SELECT DISTINCT tags.id, name, desc, field, severity FROM tags
+                JOIN issues ON tags.id = issues.tag_id
                 WHERE issues.run_id = ?
                 ",
             )?
