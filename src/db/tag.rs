@@ -1,7 +1,7 @@
 use crate::{
     config::{Field, Severity},
     db::{Queryable, Run, Upsertable},
-    parse::Tag,
+    parse::{Tag, TagSet},
     read_value, schema, write_value,
 };
 
@@ -85,7 +85,8 @@ impl Upsertable for TagInfo {
 }
 
 impl TagInfo {
-    fn select_by_name(
+    /// Get all [TagInfo]s from [super::Database] by name
+    pub fn select_by_name(
         db: &super::Database,
         name: &str,
         params: (),
@@ -95,7 +96,8 @@ impl TagInfo {
             .query_one((name,), Self::map_row(params))
     }
 
-    fn select_by_run(
+    /// Get all [TagInfo]s from [Run]
+    pub fn select_by_run(
         db: &super::Database,
         run: &super::InDatabase<Run>,
         params: (),
@@ -112,8 +114,22 @@ impl TagInfo {
             .collect()
     }
 
-    /// Remove all [Tag]s which aren't referenced by [Issue]s from [Database]
-    fn purge_orphans(db: &super::Database) -> rusqlite::Result<usize> {
+    /// Upsert a [TagSet] into [super::Database]
+    pub fn upsert_tag_set<'a>(
+        db: &super::Database,
+        tags: TagSet<Tag<'a>>,
+        params: (),
+    ) -> rusqlite::Result<TagSet<super::InDatabase<Tag<'a>>>> {
+        tags.try_swap_tags(|t| {
+            Ok(super::InDatabase::new(
+                TagInfo::from(&t).upsert(db, params)?.id,
+                t,
+            ))
+        })
+    }
+
+    /// Remove all [Tag]s which aren't referenced by [super::Issue]s from [super::Database]
+    pub fn purge_orphans(db: &super::Database) -> rusqlite::Result<usize> {
         db.conn.execute(
             "
             DELETE FROM tags WHERE NOT EXISTS (

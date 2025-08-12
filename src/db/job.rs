@@ -65,7 +65,8 @@ impl Upsertable for Job {
 }
 
 impl Job {
-    fn select_by_name(
+    /// Get a [Job] from [super::Database] by name
+    pub fn select_by_name(
         db: &super::Database,
         name: &str,
         params: (),
@@ -81,7 +82,10 @@ impl Job {
     }
 
     /// Remove all [Job]s from [super::Database] by name
-    fn purge_by_blocklist(db: &mut super::Database, names: &[String]) -> rusqlite::Result<usize> {
+    pub fn purge_by_blocklist(
+        db: &mut super::Database,
+        names: &[String],
+    ) -> rusqlite::Result<usize> {
         let mut tx = db.conn.transaction()?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
 

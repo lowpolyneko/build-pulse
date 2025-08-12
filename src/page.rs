@@ -9,7 +9,9 @@ use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
     config::TagView,
-    db::{Database, InDatabase, Job, Run},
+    db::{
+        Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, Similarity, Statistics, TagInfo,
+    },
     tag_expr::TagExpr,
 };
 
@@ -28,12 +30,12 @@ where
 /// Render a [SparseJob]
 fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Markup> {
     let last_build = match job.last_build {
-        Some(n) => Some(db.get_build(job.id, n)?),
+        Some(n) => Some(JobBuild::select_by_job(db, job.id, n, ())?),
         None => None,
     };
     let sorted_runs = match &last_build {
         Some(b) => {
-            let mut sr = db.get_runs_by_build(b)?;
+            let mut sr = Run::select_all_by_build(db, b, ())?;
             sr.par_sort_by_key(|r| match r.status {
                 Some(BuildStatus::Failure) => 0,
                 Some(BuildStatus::Unstable) => 1,
@@ -130,9 +132,9 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 }
             }
             td style="border: 1px solid black;" { // issues
-                @if let Ok(issues) = db.get_issues(run, false) {
+                @if let Ok(issues) = Issue::select_all(db, (db, run)) {
                     @if !issues.is_empty() {
-                        @if let Ok(tags) = db.get_tags_by_run(run) {
+                        @if let Ok(tags) = TagInfo::select_by_run(db, run, ()) {
                             b {
                                 "Identified Tags: "
                             }
@@ -173,7 +175,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
 
 /// Render [crate::db::Statistics]
 fn render_stats(db: &Database) -> Result<Markup> {
-    let stats = db.get_stats()?;
+    let stats = Statistics::query(db)?;
     Ok(html! {
         h3 {
             "Run Statistics"
@@ -288,7 +290,7 @@ fn render_similarities(db: &Database) -> Result<Markup> {
             "Related Issues"
         }
         table style="border: 1px solid black;" {
-            @for s in db.get_similarities()? {
+            @for s in Similarity::select_all(db, ())? {
                 tr style="border: 1px solid black; background-color: lightgray" {
                     td style="border: 1px solid black;" {
                         code title=(s.tag.desc) {
@@ -321,7 +323,7 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
             e.iter().fold(String::new(), |acc, e| format!("{acc}\n{e}")),
         )),
     }?;
-    let rows = expr.eval_rows(&db.get_tags()?);
+    let rows = expr.eval_rows(&TagInfo::select_all(db, ())?);
 
     Ok(html! {
         h4 {
@@ -329,7 +331,7 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
         }
         table style="border: 1px solid black;" {
             @for expr in rows {
-                @let matches = db.get_run_ids_by_expr(&expr)?;
+                @let matches = Run::select_all_id_by_expr(db, &expr)?;
                 @if !matches.is_empty() {
                     tr style="border: 1px solid black;" {
                         td style="border: 1px solid black;" {
@@ -359,7 +361,7 @@ fn render_run_ids(ids: &[i64], db: &Database) -> Result<Markup> {
                     @for id in ids {
                         li {
                             a href={"#" (id)} {
-                                (db.get_run_display_name(*id)?)
+                                (Run::select_one_display_name(db, *id)?)
                             }
                         }
                     }
@@ -391,7 +393,7 @@ pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup>
                 @for view in views {
                     (render_view(view, db)?)
                 }
-                @for job in db.get_jobs()? {
+                @for job in Job::select_all(db, ())? {
                     (render_job(&job, db, tz)?)
                 }
                 p {

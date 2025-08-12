@@ -16,7 +16,10 @@ use time::UtcOffset;
 use crate::{
     api::{AsBuild, AsJob, AsRun, SparseMatrixProject},
     config::{Config, Field, Severity},
-    db::{Database, InDatabase, Issue},
+    db::{
+        Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, SimilarityInfo, TagInfo,
+        Upsertable,
+    },
     parse::{Tag, TagSet, normalized_levenshtein_distance},
 };
 
@@ -76,9 +79,8 @@ fn pull_build_logs(
         .filter(|(_, build, mb)| mb.number == build.number) // filter out runs w/o matching build
         .map(|(job, build, mb)| {
             Ok((
-                db.lock()
-                    .unwrap()
-                    .upsert_job(job.as_job())
+                job.as_job()
+                    .upsert(&db.lock().unwrap(), ())
                     .map_err(Error::from)?,
                 build,
                 mb,
@@ -89,9 +91,9 @@ fn pull_build_logs(
                 let job_id = db_job.id;
                 Ok((
                     db_job,
-                    db.lock()
-                        .unwrap()
-                        .upsert_build(build.as_build(job_id))
+                    build
+                        .as_build(job_id)
+                        .upsert(&db.lock().unwrap(), ())
                         .map_err(Error::from)?,
                     mb,
                 ))
@@ -99,11 +101,13 @@ fn pull_build_logs(
             Err(e) => Err(e),
         })
         .filter_map(|res| match res {
-            Ok((db_job, db_build, mb)) => match db.lock().unwrap().get_run_by_url(&mb.url) {
-                Ok(_) => None, // cached
-                Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, db_build, mb))),
-                Err(e) => Some(Err(Error::from(e))),
-            },
+            Ok((db_job, db_build, mb)) => {
+                match Run::select_one_by_url(&db.lock().unwrap(), &mb.url, ()) {
+                    Ok(_) => None, // cached
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, db_build, mb))),
+                    Err(e) => Some(Err(Error::from(e))),
+                }
+            }
             Err(e) => Some(Err(e)),
         })
         .map(|res| match res {
@@ -123,7 +127,7 @@ fn pull_build_logs(
         })
         .map(|res| match res {
             Ok((db_job, db_build, run)) => {
-                Ok((db_job, db_build, db.lock().unwrap().upsert_run(run)?))
+                Ok((db_job, db_build, run.upsert(&db.lock().unwrap(), ())?))
             }
             Err(e) => Err(e),
         })
@@ -149,7 +153,7 @@ fn pull_build_logs(
 
 /// Parse all untagged runs for `tags` and cache them into database `db`
 fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
-    let runs = db.lock().unwrap().get_runs()?;
+    let runs = Run::select_all(&db.lock().unwrap(), ())?;
 
     runs.par_iter()
         .flat_map_iter(|run| Field::iter().map(move |f| (run, f))) // parse all fields
@@ -163,7 +167,10 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         })
         .flat_map_iter(|(run, data, t)| t.grep_issue(data).map(move |i| (run, t, i)))
         .try_for_each(|(run, t, i)| {
-            let i = db.lock().unwrap().insert_issue(run, i)?;
+            let i = {
+                let db = &db.lock().unwrap();
+                i.insert(db, (run,))
+            }?;
 
             if !matches!(t.severity, Severity::Metadata) {
                 warn!(
@@ -176,21 +183,21 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         })?;
 
     // batch update tag schema for runs afterwards
-    db.lock()
-        .unwrap()
-        .update_tag_schema_for_runs(Some(tags.schema()))?;
-
+    Run::update_all_tag_schema(&db.lock().unwrap(), Some(tags.schema()))?;
     Ok(())
 }
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
 fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
-    let runs = db.lock().unwrap().get_runs()?;
+    let runs = Run::select_all(&db.lock().unwrap(), ())?;
 
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<InDatabase<Issue>>> = Vec::new();
     runs.iter()
-        .filter_map(|r| db.lock().unwrap().get_issues(r, false).ok())
+        .filter_map(|r| {
+            let db = &db.lock().unwrap();
+            Issue::select_all_not_metadata(db, (db, r)).ok()
+        })
         .flatten()
         .for_each(|i| {
             match groups.par_iter_mut().find_any(|g| {
@@ -215,7 +222,12 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
             g.par_iter().map(move |i| (hasher.finish(), i))
         })
         .try_for_each(|(hash, i)| {
-            db.lock().unwrap().insert_similarity(hash, i)?;
+            SimilarityInfo {
+                similarity_hash: hash,
+                issue_id: i.id,
+            }
+            .insert(&db.lock().unwrap(), ())?;
+
             info!(
                 "Issue '#{}' likely matches with similarity group '#{}'!",
                 i.id, hash
@@ -249,16 +261,16 @@ fn main() -> Result<()> {
 
     // update TagSet
     info!("Updating tags...");
-    let tags = database.upsert_tags(tags)?;
+    let tags = TagInfo::upsert_tag_set(&database, tags, ())?;
 
     // purge outdated issues
-    let outdated = database.purge_invalid_issues_by_tag_schema(tags.schema())?;
+    let outdated = Issue::delete_all_invalid_by_tag_schema(&mut database, tags.schema())?;
     if outdated > 0 {
         warn!("Purged {outdated} runs' issues that parsed with an outdated tag schema!");
     }
 
     // purge blocklisted jobs
-    let blocked = database.purge_blocklisted_jobs(&config.blocklist)?;
+    let blocked = Job::purge_by_blocklist(&mut database, &config.blocklist)?;
     if blocked > 0 {
         warn!("Purged {blocked} jobs that are on the blocklist.");
     }
@@ -287,7 +299,7 @@ fn main() -> Result<()> {
     info!("Done!");
     info!("----------------------------------------");
 
-    if database.get_mut().unwrap().has_untagged_runs()? {
+    if Run::has_untagged(database.get_mut().unwrap())? {
         info!("Parsing unprocessed run logs...");
         parse_unprocessed_runs(&tags, &database)?;
 
@@ -296,10 +308,10 @@ fn main() -> Result<()> {
 
         // purge old data
         info!("Purging old runs...");
-        database.get_mut().unwrap().purge_old_builds()?;
+        JobBuild::purge_old(database.get_mut().unwrap())?;
 
         info!("Purging extraneous tags...");
-        database.get_mut().unwrap().purge_orphan_tags()?;
+        TagInfo::purge_orphans(database.get_mut().unwrap())?;
 
         info!("Calculating issue similarities...");
         calculate_similarities(&database)?;

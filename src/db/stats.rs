@@ -33,9 +33,9 @@ pub struct Statistics {
     pub unknown_runs: Vec<i64>,
 }
 
-/// Gets [Database]'s [Statistics]
 impl Statistics {
-    pub fn new(db: &super::Database) -> rusqlite::Result<Self> {
+    /// Gets [super::Database]'s [Statistics]
+    pub fn query(db: &super::Database) -> rusqlite::Result<Self> {
         // calculate success/failures for all runs
         let mut stats = db
             .conn

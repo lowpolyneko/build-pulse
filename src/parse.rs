@@ -134,7 +134,7 @@ impl<'a> InDatabase<Tag<'a>> {
             .find_iter(field)
             .map(|m| Issue {
                 snippet: m.as_str(),
-                tag: self.id,
+                tag_id: self.id,
                 duplicates: 0,
             })
             .for_each(|i| {

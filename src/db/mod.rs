@@ -43,7 +43,7 @@ macro_rules! schema {
             $crate::schema!(@insert $table $($schema)+);
             $crate::schema!(@select_one $table);
             $crate::schema!(@select_all $table);
-            $crate::schema!(@purge $table);
+            $crate::schema!(@delete_all $table);
         })+
     };
 
@@ -126,8 +126,8 @@ macro_rules! schema {
         );
     };
 
-    (@purge $table:tt) => {
-        const PURGE: &'static str = concat!(
+    (@delete_all $table:tt) => {
+        const DELETE_ALL: &'static str = concat!(
             "DELETE FROM ",
             stringify!($table)
         );
@@ -236,7 +236,7 @@ impl Database {
 
     /// Purge all rows (but not tables) from [Database]
     pub fn purge_cache(&self) -> Result<()> {
-        all_tables!(purge(self)?);
+        all_tables!(delete_all(self)?);
         Ok(())
     }
 }
@@ -246,7 +246,7 @@ pub trait Schema: Sized {
     const INSERT: &'static str;
     const SELECT_ONE: &'static str;
     const SELECT_ALL: &'static str;
-    const PURGE: &'static str;
+    const DELETE_ALL: &'static str;
 
     fn create_table(db: &Database) -> Result<usize> {
         db.conn.execute(Self::CREATE_TABLE, ())
@@ -277,8 +277,8 @@ pub trait Queryable<I = (), E = ()>: Schema {
             .collect()
     }
 
-    fn purge(db: &Database) -> Result<usize> {
-        db.conn.execute(Self::PURGE, ())
+    fn delete_all(db: &Database) -> Result<usize> {
+        db.conn.execute(Self::DELETE_ALL, ())
     }
 }
 

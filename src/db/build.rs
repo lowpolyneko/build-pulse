@@ -87,7 +87,8 @@ impl Upsertable for JobBuild {
 }
 
 impl JobBuild {
-    fn select_by_job(
+    /// Get a [JobBuild] from [super::Database] by [super::Job] id and build number
+    pub fn select_by_job(
         db: &super::Database,
         job_id: i64,
         number: u32,
@@ -104,7 +105,8 @@ impl JobBuild {
             .query_one((job_id, number), Self::map_row(()))
     }
 
-    fn purge_old(db: &super::Database) -> rusqlite::Result<()> {
+    /// Remove all [JobBuild]s which aren't referenced by [super::Job] from [super::Database]
+    pub fn purge_old(db: &super::Database) -> rusqlite::Result<()> {
         db.conn.execute_batch(
             "
             BEGIN;

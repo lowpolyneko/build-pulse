@@ -43,7 +43,9 @@ impl<'a> Queryable<(&super::Database, &'a super::InDatabase<Run>), (&'a super::I
                     snippet: &match tag.field {
                         Field::Console => run.log.as_ref().ok_or(rusqlite::Error::InvalidQuery)?,
                         Field::RunName => &run.display_name,
-                    }[row.get(1)?..row.get(2)?],
+                    }
+                    .get(row.get(1)?..row.get(2)?)
+                    .ok_or(rusqlite::Error::InvalidQuery)?,
                     tag_id: tag.id,
                     duplicates: row.get(5).map(i64::cast_unsigned)?,
                 },
@@ -69,10 +71,35 @@ impl<'a> Queryable<(&super::Database, &'a super::InDatabase<Run>), (&'a super::I
 
         Ok((start, end, self.tag_id, self.duplicates.cast_signed()))
     }
+
+    fn select_all(
+        db: &super::Database,
+        params: (&super::Database, &'a super::InDatabase<Run>),
+    ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
+        let (_, run) = params;
+        db.conn
+            .prepare_cached(
+                "
+                SELECT
+                    issues.id,
+                    snippet_start,
+                    snippet_end,
+                    run_id,
+                    tag_id,
+                    duplicates
+                FROM issues
+                JOIN tags ON tags.id = issues.tag_id
+                WHERE issues.run_id = ?
+                ",
+            )?
+            .query_map((run.id,), Self::map_row(params))?
+            .collect()
+    }
 }
 
 impl<'a> Issue<'a> {
-    fn select_all_not_metadata(
+    /// Get all [Issue]s from [super::Database] that aren't [Severity::Metadata]
+    pub fn select_all_not_metadata(
         db: &super::Database,
         params: (&super::Database, &'a super::InDatabase<Run>),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
@@ -100,8 +127,8 @@ impl<'a> Issue<'a> {
             .collect()
     }
 
-    /// Remove all [Issue]s with an outdated [TagSet] schema from [Database]
-    pub fn purge_invalid_issues_by_tag_schema(
+    /// Remove all [Issue]s with an outdated [crate::parse::TagSet] schema from [super::Database]
+    pub fn delete_all_invalid_by_tag_schema(
         db: &mut super::Database,
         current_schema: u64,
     ) -> rusqlite::Result<usize> {

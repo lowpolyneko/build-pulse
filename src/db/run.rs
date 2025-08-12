@@ -92,12 +92,13 @@ impl Upsertable for Run {
             )?
             .execute(self.as_params(params)?)?;
 
-        Self::select_by_url(db, &self.url, ())
+        Self::select_one_by_url(db, &self.url, ())
     }
 }
 
 impl Run {
-    fn select_by_url(
+    /// Get a [Run] from [super::Database] by url
+    pub fn select_one_by_url(
         db: &super::Database,
         url: &str,
         params: (),
@@ -112,7 +113,8 @@ impl Run {
             .query_one((url,), Self::map_row(params))
     }
 
-    fn select_by_build(
+    /// Get all [Run]s by [super::JobBuild]
+    pub fn select_all_by_build(
         db: &super::Database,
         build: &super::InDatabase<JobBuild>,
         params: (),
@@ -128,7 +130,11 @@ impl Run {
             .collect()
     }
 
-    fn select_ids_by_expr(db: &super::Database, expr: &TagExpr) -> rusqlite::Result<Vec<i64>> {
+    /// Get all [Run] ID by [TagExpr] in [super::Database]
+    pub fn select_all_id_by_expr(
+        db: &super::Database,
+        expr: &TagExpr,
+    ) -> rusqlite::Result<Vec<i64>> {
         let (stmt, params) = expr.to_sql_select()?;
         db.conn
             .prepare(&stmt)?
@@ -136,21 +142,22 @@ impl Run {
             .collect()
     }
 
-    fn select_display_name(db: &super::Database, id: i64) -> rusqlite::Result<String> {
+    /// Get a [Run]'s display name by id in [super::Database]
+    pub fn select_one_display_name(db: &super::Database, id: i64) -> rusqlite::Result<String> {
         db.conn
             .prepare_cached("SELECT display_name FROM runs WHERE id = ?")?
             .query_one((id,), |row| row.get(0))
     }
 
-    /// Check whether or not there are untagged runs
+    /// Check whether or not there are untagged [Run]s in [super::Database]
     pub fn has_untagged(db: &super::Database) -> rusqlite::Result<bool> {
         db.conn
             .prepare_cached("SELECT 1 FROM runs WHERE tag_schema IS NULL")?
             .exists(())
     }
 
-    /// Update the [TagSet] schema for all [Run]s in [Database]
-    pub fn update_tag_schema_for_runs(
+    /// Update the [crate::parse::TagSet] schema for all [Run]s in [super::Database]
+    pub fn update_all_tag_schema(
         db: &super::Database,
         new_schema: Option<u64>,
     ) -> rusqlite::Result<usize> {
