@@ -52,64 +52,73 @@ macro_rules! schema {
             "CREATE TABLE IF NOT EXISTS ",
             stringify!($table),
             " (",
-            $crate::schema!(@create_table_col $($schema)+),
+            $crate::schema!(@column_def $($schema)+),
             ") STRICT"
         );
     };
 
-    (@create_table_col $col:tt $type:tt, $($rest:tt)+) => {
-        concat!(stringify!($col), " ", stringify!($type), ", ", $crate::schema!(@create_table_col $($rest)+))
+    (@column_def $col:tt $type:tt, $($rest:tt)+) => {
+        concat!(stringify!($col), " ", stringify!($type), ",", $crate::schema!(@column_def $($rest)+))
+    };
+    (@column_def $col:tt $type:tt $($rest:tt)*) => {
+        concat!(stringify!($col), " ", stringify!($type), $crate::schema!(@column_constraint $($rest)*))
     };
 
-    (@create_table_col $col:tt $type:tt $($rest:tt)*) => {
-        concat!(stringify!($col), " ", stringify!($type), $crate::schema!(@create_table_const $($rest)*))
+    (@column_constraint $constraint:tt, $($rest:tt)+) => {
+        concat!(" ", stringify!($constraint), ",", $crate::schema!(@column_def $($rest)+))
     };
-
-    (@create_table_const $constraint:tt, $($rest:tt)+) => {
-        concat!(" ", stringify!($constraint), ", ", $crate::schema!(@create_table_col $($rest)+))
+    (@column_constraint $constraint:tt $($rest:tt)*) => {
+        concat!(" ", stringify!($constraint), $crate::schema!(@column_constraint $($rest)*))
     };
-
-    (@create_table_const $constraint:tt $($rest:tt)*) => {
-        concat!(" ", stringify!($constraint), $crate::schema!(@create_table_const $($rest)*))
-    };
-
-    (@create_table_const) => { "" };
+    (@column_constraint) => { "" };
 
     (@insert $table:tt $($schema:tt)+) => {
         const INSERT: &'static str = concat!(
             "INSERT INTO ",
             stringify!($table),
             " (",
+            $crate::schema!(@insert_col $($schema)+),
+            ") VALUES (",
             $crate::schema!(@repeat_vars $($schema)+),
             ")"
         );
     };
 
+    (@insert_col id INTEGER PRIMARY KEY, $($rest:tt)+) => {
+        $crate::schema!(@insert_col $($rest)+) // skip id
+    };
+    (@insert_col $col:tt $_type:tt, $($rest:tt)+) => {
+        concat!(stringify!($col), ",", $crate::schema!(@insert_col $($rest)+))
+    };
+    (@insert_col $col:tt $_type:tt $($rest:tt)*) => {
+        concat!(stringify!($col), $crate::schema!(@insert_col_const $($rest)*))
+    };
+
+    (@insert_col_const $_constraint:tt, $($rest:tt)+) => {
+        concat!(",", $crate::schema!(@insert_col $($rest)*))
+    };
+    (@insert_col_const $_constraint:tt $($rest:tt)*) => {
+        $crate::schema!(@insert_col_const $($rest)*)
+    };
+    (@insert_col_const) => { "" };
+
     (@repeat_vars id INTEGER PRIMARY KEY, $($rest:tt)+) => {
         $crate::schema!(@repeat_vars $($rest)+) // skip id
     };
-
-    (@repeat_vars $_col:tt $_type:tt $($rest:tt)*) => {
-        concat!("?", $crate::schema!(@repeat_vars_const $($rest)*))
-    };
-
     (@repeat_vars $_col:tt $_type:tt, $($rest:tt)+) => {
         concat!("?,", $crate::schema!(@repeat_vars $($rest)+))
     };
-
     (@repeat_vars $_col:tt $_type:tt $($rest:tt)*) => {
-        concat!("?", $crate::schema!(@repeat_vars_const $($rest)*))
+        concat!("?", $crate::schema!(@repeat_vars_constraint $($rest)*))
     };
 
-    (@repeat_vars_const $_constraint:tt, $($rest:tt)+) => {
+    (@repeat_vars_constraint $_constraint:tt, $($rest:tt)+) => {
         concat!(",", $crate::schema!(@repeat_vars $($rest)*))
     };
-
-    (@repeat_vars_const $_constraint:tt $($rest:tt)*) => {
-        $crate::schema!(@repeat_vars_const $($rest)*)
+    (@repeat_vars_constraint $_constraint:tt $($rest:tt)*) => {
+        $crate::schema!(@repeat_vars_constraint $($rest)*)
     };
-
-    (@repeat_vars_const) => { "" };
+    (@repeat_vars_constraint) => { "" };
 
     (@select_one $table:tt) => {
         const SELECT_ONE: &'static str = concat!(

@@ -69,7 +69,13 @@ impl<'a> Queryable<(&super::Database, &'a super::InDatabase<Run>), (&'a super::I
         };
         let end = start + self.snippet.len();
 
-        Ok((start, end, self.tag_id, self.duplicates.cast_signed()))
+        Ok((
+            start,
+            end,
+            run.id,
+            self.tag_id,
+            self.duplicates.cast_signed(),
+        ))
     }
 
     fn select_all(
