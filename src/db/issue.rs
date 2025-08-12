@@ -22,8 +22,8 @@ schema! {
         id              INTEGER PRIMARY KEY,
         snippet_start   INTEGER NOT NULL,
         snippet_end     INTEGER NOT NULL,
-        run_id          INTEGER NOT NULL REFERENCES (runs),
-        tag_id          INTEGER NOT NULL REFERENCES (tags),
+        run_id          INTEGER NOT NULL REFERENCES runs(id),
+        tag_id          INTEGER NOT NULL REFERENCES tags(id),
         duplicates      INTEGER NOT NULL
     }
 }

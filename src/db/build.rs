@@ -30,7 +30,7 @@ schema! {
         status      TEXT,
         number      INTEGER NOT NULL,
         timestamp   INTEGER NOT NULL,
-        job_id      INTEGER NOT NULL REFERENCES (jobs)
+        job_id      INTEGER NOT NULL REFERENCES jobs(id)
     }
 }
 

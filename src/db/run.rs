@@ -36,7 +36,7 @@ schema! {
         display_name    TEXT NOT NULL,
         log             TEXT,
         tag_schema      INTEGER,
-        build_id        INTEGER NOT NULL REFERENCES (builds)
+        build_id        INTEGER NOT NULL REFERENCES builds(id)
     }
 }
 

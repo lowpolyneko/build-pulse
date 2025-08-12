@@ -21,7 +21,7 @@ schema! {
     similarities for SimilarityInfo {
         id              INTEGER PRIMARY KEY,
         similarity_hash INTEGER NOT NULL,
-        issue_id        INTEGER NOT NULL REFERENCES (issues)
+        issue_id        INTEGER NOT NULL REFERENCES issues(id)
     }
 }
 
