@@ -53,7 +53,7 @@ impl Upsertable for Job {
                     url,
                     last_build
                 ) VALUES (?, ?, ?)
-                    ON CONFLICT(name, url) DO UPDATE SET
+                    ON CONFLICT(name) DO UPDATE SET
                         last_build = excluded.last_build
                 ",
             )?
