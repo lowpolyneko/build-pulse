@@ -40,7 +40,7 @@ impl<'a> Queryable<(&super::Database, &'a super::InDatabase<Run>), (&'a super::I
             Ok(super::InDatabase::new(
                 row.get(0)?,
                 Self {
-                    snippet: &match tag.field {
+                    snippet: match tag.field {
                         Field::Console => run.log.as_ref().ok_or(rusqlite::Error::InvalidQuery)?,
                         Field::RunName => &run.display_name,
                     }
