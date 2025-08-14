@@ -5,7 +5,7 @@ use crate::{
     read_value, schema, write_value,
 };
 
-/// [JobBuild] in [Database]
+/// [JobBuild] in [super::Database]
 pub struct JobBuild {
     /// Build url
     pub url: String,
@@ -19,7 +19,7 @@ pub struct JobBuild {
     /// Build timestamp
     pub timestamp: u64,
 
-    /// ID of associated [Job]
+    /// ID of associated [super::Job]
     pub job_id: i64,
 }
 

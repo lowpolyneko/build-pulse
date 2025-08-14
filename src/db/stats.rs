@@ -2,34 +2,34 @@ use jenkins_api::build::BuildStatus;
 
 use crate::{config::Severity, read_value, write_value};
 
-/// Statistics of [Issue]s and [Run]s in [Database]
+/// Statistics of [super::Issue]s and [super::Run]s in [super::Database]
 #[derive(Default)]
 pub struct Statistics {
-    /// Number of [BuildStatus::Success] [Job]s
+    /// Number of [BuildStatus::Success] [super::Job]s
     pub successful_jobs: u64,
 
-    /// Total number of tracked [Job]s
+    /// Total number of tracked [super::Job]s
     pub total_jobs: u64,
 
-    /// Successful [Run]s
+    /// Successful [super::Run]s
     pub successful: Vec<i64>,
 
-    /// Unstable [Run]s
+    /// Unstable [super::Run]s
     pub unstable: Vec<i64>,
 
-    /// Failed [Run]s
+    /// Failed [super::Run]s
     pub failures: Vec<i64>,
 
-    /// Aborted [Run]s
+    /// Aborted [super::Run]s
     pub aborted: Vec<i64>,
 
-    /// Not built [Run]s
+    /// Not built [super::Run]s
     pub not_built: Vec<i64>,
 
-    /// Total [Issue]s found
+    /// Total [super::Issue]s found
     pub issues_found: u64,
 
-    /// [Run]s with unknown issues
+    /// [super::Run]s with unknown issues
     pub unknown_runs: Vec<i64>,
 }
 

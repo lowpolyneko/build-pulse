@@ -185,7 +185,7 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
 
 /// Calculate a normalized [levenshtein_distance] using an exponential decay model
 ///
-/// https://www.cse.lehigh.edu/%7Elopresti/Publications/1996/sdair96.pdf
+/// <https://www.cse.lehigh.edu/%7Elopresti/Publications/1996/sdair96.pdf>
 #[inline]
 pub fn normalized_levenshtein_distance(a: &str, b: &str) -> f32 {
     let d = levenshtein_distance(a, b) as f32;

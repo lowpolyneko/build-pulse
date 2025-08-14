@@ -3,7 +3,7 @@ use crate::{
     schema,
 };
 
-/// [Job] stored in [Database]
+/// [Job] stored in [super::Database]
 pub struct Job {
     /// Unique name of [Job]
     pub name: String,
@@ -11,7 +11,7 @@ pub struct Job {
     /// [Job] url
     pub url: String,
 
-    /// Number of last [JobBuild]
+    /// Number of last [super::JobBuild]
     pub last_build: Option<u32>,
 }
 

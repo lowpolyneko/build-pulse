@@ -143,6 +143,7 @@ macro_rules! schema {
     };
 }
 
+/// Convenience macro to run method on all types
 macro_rules! for_all {
     ([$type:ty, $($rest:ty),*] => $($method:tt)+) => {
         <$type>::$($method)+;
@@ -152,9 +153,7 @@ macro_rules! for_all {
     ([$type:ty] => $($method:tt)+) => {
         <$type>::$($method)+;
     };
-}
 
-macro_rules! all_tables {
     ($($method:tt)+) => {
         for_all!([Job, JobBuild, Run, Issue, TagInfo, SimilarityInfo] => $($method)+)
     };
@@ -254,14 +253,14 @@ impl Database {
         };
 
         // create the necessary tables
-        all_tables!(create_table(&db)?);
+        for_all!(create_table(&db)?);
 
         Ok(db)
     }
 
     /// Purge all rows (but not tables) from [Database]
     pub fn purge_cache(&self) -> Result<()> {
-        all_tables!(delete_all(self)?);
+        for_all!(delete_all(self)?);
         Ok(())
     }
 }
@@ -273,37 +272,46 @@ pub trait Schema: Sized {
     const SELECT_ALL: &'static str;
     const DELETE_ALL: &'static str;
 
+    /// Creates the table in [Database]
     fn create_table(db: &Database) -> Result<usize> {
         db.execute(Self::CREATE_TABLE, ())
     }
 }
 
 pub trait Queryable<I = (), E = ()>: Schema {
+    /// Convert [Row] to `Self` with params
     fn map_row(params: I) -> impl FnMut(&Row) -> Result<InDatabase<Self>>;
+
+    /// Convert `self` to [Params] with `params`
     fn as_params(&self, params: E) -> Result<impl Params>;
 
+    /// Insert `self` to [Database] with `params`
     fn insert(self, db: &Database, params: E) -> Result<InDatabase<Self>> {
         db.prepare_cached(Self::INSERT)?
             .execute(self.as_params(params)?)?;
         Ok(InDatabase::new(db.last_insert_rowid(), self))
     }
 
+    /// Select one of `Self` from [Database] by `id` with `params`
     fn select_one(db: &Database, id: i64, params: I) -> Result<InDatabase<Self>> {
         db.prepare_cached(Self::SELECT_ONE)?
             .query_one((id,), Self::map_row(params))
     }
 
+    /// Select all of `Self` from [Database] with `params`
     fn select_all(db: &Database, params: I) -> Result<Vec<InDatabase<Self>>> {
         db.prepare_cached(Self::SELECT_ALL)?
             .query_map((), Self::map_row(params))?
             .collect()
     }
 
+    /// Delete all of `Self` from [Database]
     fn delete_all(db: &Database) -> Result<usize> {
         db.execute(Self::DELETE_ALL, ())
     }
 }
 
 pub trait Upsertable<I = (), E = ()>: Queryable<I, E> {
+    /// Upsert `self` to [Database] with `params`
     fn upsert(self, db: &Database, params: E) -> Result<InDatabase<Self>>;
 }

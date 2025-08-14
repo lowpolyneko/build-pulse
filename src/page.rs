@@ -27,7 +27,7 @@ where
         .map_err(Error::from)
 }
 
-/// Render a [SparseJob]
+/// Render a [crate::api::SparseJob]
 fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Markup> {
     let last_build = match job.last_build {
         Some(n) => Some(JobBuild::select_one_by_job(db, job.id, n, ())?),

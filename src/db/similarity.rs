@@ -10,7 +10,7 @@ pub struct SimilarityInfo {
     pub issue_id: i64,
 }
 
-/// List of similar [Run]s by [TagInfo] in [Database]
+/// List of similar [Run]s by [TagInfo] in [super::Database]
 pub struct Similarity {
     pub tag: InDatabase<TagInfo>,
     pub related: Vec<i64>,
@@ -44,6 +44,7 @@ impl Queryable for SimilarityInfo {
 }
 
 impl Similarity {
+    /// Get all similarities by [crate::parse::Tag] in [super::Database]
     pub fn query_all(db: &super::Database, _: ()) -> rusqlite::Result<Vec<Self>> {
         let mut hm: HashMap<u64, Self> = HashMap::new();
         db.prepare_cached(

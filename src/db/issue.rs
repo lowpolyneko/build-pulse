@@ -4,13 +4,13 @@ use crate::{
     schema, write_value,
 };
 
-/// [Issue] stored in [Database]
+/// [Issue] stored in [super::Database]
 #[derive(PartialEq, Eq, Hash)]
 pub struct Issue<'a> {
     /// String snippet from [Run]
     pub snippet: &'a str,
 
-    /// [Tag] associated with [Issue]
+    /// [crate::parse::Tag] associated with [Issue]
     pub tag_id: i64,
 
     /// Number of duplicate emits in the same [Run]
