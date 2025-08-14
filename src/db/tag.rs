@@ -49,8 +49,8 @@ impl Queryable for TagInfo {
                 Self {
                     name: row.get(1)?,
                     desc: row.get(2)?,
-                    severity: read_value!(row, 3),
-                    field: read_value!(row, 4),
+                    field: read_value!(row, 3),
+                    severity: read_value!(row, 4),
                 },
             ))
         }
@@ -92,7 +92,7 @@ impl TagInfo {
         params: (),
     ) -> rusqlite::Result<super::InDatabase<Self>> {
         db.conn
-            .prepare_cached("SELECT id, name, desc, severity, field FROM tags WHERE name = ?")?
+            .prepare_cached("SELECT * FROM tags WHERE name = ?")?
             .query_one((name,), Self::map_row(params))
     }
 

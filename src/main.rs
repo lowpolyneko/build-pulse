@@ -169,7 +169,7 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         .try_for_each(|(run, t, i)| {
             let i = {
                 let db = &db.lock().unwrap();
-                i.insert(db, (run,))
+                i.insert(db, (db, run))
             }?;
 
             if !matches!(t.severity, Severity::Metadata) {

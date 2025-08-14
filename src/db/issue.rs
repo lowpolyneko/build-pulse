@@ -28,8 +28,11 @@ schema! {
     }
 }
 
-impl<'a> Queryable<(&super::Database, &'a super::InDatabase<Run>), (&'a super::InDatabase<Run>,)>
-    for Issue<'a>
+impl<'a>
+    Queryable<
+        (&super::Database, &'a super::InDatabase<Run>),
+        (&super::Database, &'a super::InDatabase<Run>),
+    > for Issue<'a>
 {
     fn map_row(
         params: (&super::Database, &'a super::InDatabase<Run>),
@@ -55,14 +58,14 @@ impl<'a> Queryable<(&super::Database, &'a super::InDatabase<Run>), (&'a super::I
 
     fn as_params(
         &self,
-        params: (&super::InDatabase<Run>,),
+        params: (&super::Database, &super::InDatabase<Run>),
     ) -> rusqlite::Result<impl rusqlite::Params> {
-        let (run,) = params;
-        let log = run
-            .log
-            .as_ref()
-            .ok_or(rusqlite::Error::InvalidQuery)?
-            .as_ptr();
+        let (db, run) = params;
+        let log = match TagInfo::select_one(db, self.tag_id, ())?.field {
+            Field::Console => run.log.as_ref().ok_or(rusqlite::Error::InvalidQuery)?,
+            Field::RunName => &run.display_name,
+        }
+        .as_ptr();
         let start = unsafe {
             // SAFETY: [Run] owns all underlying [Issue]s
             self.snippet.as_ptr().offset_from_unsigned(log)
