@@ -46,9 +46,8 @@ impl Queryable for SimilarityInfo {
 impl Similarity {
     pub fn query_all(db: &super::Database, _: ()) -> rusqlite::Result<Vec<Self>> {
         let mut hm: HashMap<u64, Self> = HashMap::new();
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT DISTINCT
                     similarity_hash,
                     tag_id,
@@ -57,37 +56,37 @@ impl Similarity {
                 FROM similarities
                 JOIN issues ON issues.id = similarities.issue_id
                 ",
-            )?
-            .query_map((), |row| {
-                Ok((
-                    row.get(0).map(i64::cast_unsigned)?,
-                    TagInfo::select_one(db, row.get(1)?, ())?,
-                    row.get(2)?,
-                    row.get(3)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .into_iter()
-            .try_for_each(|(hash, tag, run_id, issue_id)| {
-                hm.entry(hash)
-                    .or_insert({
-                        Self {
-                            tag,
-                            related: Vec::new(),
-                            example: Issue::select_one(
-                                db,
-                                issue_id,
-                                (db, &Run::select_one(db, run_id, ())?),
-                            )?
-                            .snippet
-                            .to_owned(),
-                        }
-                    })
-                    .related
-                    .push(run_id);
+        )?
+        .query_map((), |row| {
+            Ok((
+                row.get(0).map(i64::cast_unsigned)?,
+                TagInfo::select_one(db, row.get(1)?, ())?,
+                row.get(2)?,
+                row.get(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .try_for_each(|(hash, tag, run_id, issue_id)| {
+            hm.entry(hash)
+                .or_insert({
+                    Self {
+                        tag,
+                        related: Vec::new(),
+                        example: Issue::select_one(
+                            db,
+                            issue_id,
+                            (db, &Run::select_one(db, run_id, ())?),
+                        )?
+                        .snippet
+                        .to_owned(),
+                    }
+                })
+                .related
+                .push(run_id);
 
-                Ok::<_, rusqlite::Error>(())
-            })?;
+            Ok::<_, rusqlite::Error>(())
+        })?;
 
         Ok(hm.into_values().collect())
     }

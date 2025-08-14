@@ -166,6 +166,22 @@ pub struct Database {
     conn: Connection,
 }
 
+/// Implicit deref to [Connection] from [Database]
+impl Deref for Database {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.conn
+    }
+}
+
+/// Implicit deref_mut to [Connection] from [Database]
+impl DerefMut for Database {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.conn
+    }
+}
+
 /// Represents an item `T` in [Database]
 pub struct InDatabase<T> {
     /// Row ID of `item`
@@ -258,7 +274,7 @@ pub trait Schema: Sized {
     const DELETE_ALL: &'static str;
 
     fn create_table(db: &Database) -> Result<usize> {
-        db.conn.execute(Self::CREATE_TABLE, ())
+        db.execute(Self::CREATE_TABLE, ())
     }
 }
 
@@ -267,27 +283,24 @@ pub trait Queryable<I = (), E = ()>: Schema {
     fn as_params(&self, params: E) -> Result<impl Params>;
 
     fn insert(self, db: &Database, params: E) -> Result<InDatabase<Self>> {
-        db.conn
-            .prepare_cached(Self::INSERT)?
+        db.prepare_cached(Self::INSERT)?
             .execute(self.as_params(params)?)?;
-        Ok(InDatabase::new(db.conn.last_insert_rowid(), self))
+        Ok(InDatabase::new(db.last_insert_rowid(), self))
     }
 
     fn select_one(db: &Database, id: i64, params: I) -> Result<InDatabase<Self>> {
-        db.conn
-            .prepare_cached(Self::SELECT_ONE)?
+        db.prepare_cached(Self::SELECT_ONE)?
             .query_one((id,), Self::map_row(params))
     }
 
     fn select_all(db: &Database, params: I) -> Result<Vec<InDatabase<Self>>> {
-        db.conn
-            .prepare_cached(Self::SELECT_ALL)?
+        db.prepare_cached(Self::SELECT_ALL)?
             .query_map((), Self::map_row(params))?
             .collect()
     }
 
     fn delete_all(db: &Database) -> Result<usize> {
-        db.conn.execute(Self::DELETE_ALL, ())
+        db.execute(Self::DELETE_ALL, ())
     }
 }
 

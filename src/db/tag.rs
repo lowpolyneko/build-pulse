@@ -68,17 +68,16 @@ impl Queryable for TagInfo {
 
 impl Upsertable for TagInfo {
     fn upsert(self, db: &super::Database, params: ()) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
             INSERT INTO tags (name, desc, field, severity) VALUES (?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     desc = excluded.desc,
                     field = excluded.field,
                     severity = excluded.severity
             ",
-            )?
-            .execute(self.as_params(params)?)?;
+        )?
+        .execute(self.as_params(params)?)?;
 
         Self::select_one_by_name(db, &self.name, ())
     }
@@ -91,8 +90,7 @@ impl TagInfo {
         name: &str,
         params: (),
     ) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached("SELECT * FROM tags WHERE name = ?")?
+        db.prepare_cached("SELECT * FROM tags WHERE name = ?")?
             .query_one((name,), Self::map_row(params))
     }
 
@@ -102,16 +100,15 @@ impl TagInfo {
         run: &super::InDatabase<Run>,
         params: (),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT DISTINCT tags.id, name, desc, field, severity FROM tags
                 JOIN issues ON tags.id = issues.tag_id
                 WHERE issues.run_id = ?
                 ",
-            )?
-            .query_map((run.id,), Self::map_row(params))?
-            .collect()
+        )?
+        .query_map((run.id,), Self::map_row(params))?
+        .collect()
     }
 
     /// Upsert a [TagSet] into [super::Database]
@@ -130,7 +127,7 @@ impl TagInfo {
 
     /// Remove all [Tag]s which aren't referenced by [super::Issue]s from [super::Database]
     pub fn delete_all_orphan(db: &super::Database) -> rusqlite::Result<usize> {
-        db.conn.execute(
+        db.execute(
             "
             DELETE FROM tags WHERE NOT EXISTS (
                 SELECT 1 FROM issues

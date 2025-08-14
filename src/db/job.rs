@@ -45,9 +45,8 @@ impl Queryable for Job {
 
 impl Upsertable for Job {
     fn upsert(self, db: &super::Database, params: ()) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 INSERT INTO jobs (
                     name,
                     url,
@@ -56,8 +55,8 @@ impl Upsertable for Job {
                     ON CONFLICT(name) DO UPDATE SET
                         last_build = excluded.last_build
                 ",
-            )?
-            .execute(self.as_params(params)?)?;
+        )?
+        .execute(self.as_params(params)?)?;
 
         // get the job as a second query in-case of an insert conflict
         Self::select_one_by_name(db, &self.name, ())
@@ -71,14 +70,13 @@ impl Job {
         name: &str,
         params: (),
     ) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT * FROM jobs
                 WHERE name = ?
                 ",
-            )?
-            .query_one((name,), Self::map_row(params))
+        )?
+        .query_one((name,), Self::map_row(params))
     }
 
     /// Remove all [Job]s from [super::Database] by name
@@ -86,7 +84,7 @@ impl Job {
         db: &mut super::Database,
         names: &[String],
     ) -> rusqlite::Result<usize> {
-        let mut tx = db.conn.transaction()?;
+        let mut tx = db.transaction()?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
 
         names.iter().try_fold(0, |acc, name| {

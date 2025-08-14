@@ -71,9 +71,8 @@ impl Queryable for Run {
 
 impl Upsertable for Run {
     fn upsert(self, db: &super::Database, params: ()) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 INSERT INTO runs (
                     url,
                     status,
@@ -89,8 +88,8 @@ impl Upsertable for Run {
                         tag_schema = excluded.tag_schema,
                         build_id = excluded.build_id
                 ",
-            )?
-            .execute(self.as_params(params)?)?;
+        )?
+        .execute(self.as_params(params)?)?;
 
         Self::select_one_by_url(db, &self.url, ())
     }
@@ -103,14 +102,13 @@ impl Run {
         url: &str,
         params: (),
     ) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT * FROM runs
                 WHERE url = ?
                 ",
-            )?
-            .query_one((url,), Self::map_row(params))
+        )?
+        .query_one((url,), Self::map_row(params))
     }
 
     /// Get all [Run]s by [super::JobBuild]
@@ -119,15 +117,14 @@ impl Run {
         build: &super::InDatabase<JobBuild>,
         params: (),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT * FROM runs
                 WHERE build_id = ?
                 ",
-            )?
-            .query_map((build.id,), Self::map_row(params))?
-            .collect()
+        )?
+        .query_map((build.id,), Self::map_row(params))?
+        .collect()
     }
 
     /// Get all [Run] ID by [TagExpr] in [super::Database]
@@ -136,23 +133,20 @@ impl Run {
         expr: &TagExpr,
     ) -> rusqlite::Result<Vec<i64>> {
         let (stmt, params) = expr.to_sql_select()?;
-        db.conn
-            .prepare(&stmt)?
+        db.prepare(&stmt)?
             .query_map(params, |row| row.get(0))?
             .collect()
     }
 
     /// Get a [Run]'s display name by id in [super::Database]
     pub fn select_one_display_name(db: &super::Database, id: i64) -> rusqlite::Result<String> {
-        db.conn
-            .prepare_cached("SELECT display_name FROM runs WHERE id = ?")?
+        db.prepare_cached("SELECT display_name FROM runs WHERE id = ?")?
             .query_one((id,), |row| row.get(0))
     }
 
     /// Check whether or not there are untagged [Run]s in [super::Database]
     pub fn has_untagged(db: &super::Database) -> rusqlite::Result<bool> {
-        db.conn
-            .prepare_cached("SELECT 1 FROM runs WHERE tag_schema IS NULL")?
+        db.prepare_cached("SELECT 1 FROM runs WHERE tag_schema IS NULL")?
             .exists(())
     }
 
@@ -161,7 +155,7 @@ impl Run {
         db: &super::Database,
         new_schema: Option<u64>,
     ) -> rusqlite::Result<usize> {
-        db.conn.execute(
+        db.execute(
             "UPDATE runs SET tag_schema = ?",
             (new_schema.map(u64::cast_signed),),
         )

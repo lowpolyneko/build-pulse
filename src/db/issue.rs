@@ -86,9 +86,8 @@ impl<'a>
         params: (&super::Database, &'a super::InDatabase<Run>),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
         let (_, run) = params;
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT
                     issues.id,
                     snippet_start,
@@ -100,9 +99,9 @@ impl<'a>
                 JOIN tags ON tags.id = issues.tag_id
                 WHERE issues.run_id = ?
                 ",
-            )?
-            .query_map((run.id,), Self::map_row(params))?
-            .collect()
+        )?
+        .query_map((run.id,), Self::map_row(params))?
+        .collect()
     }
 }
 
@@ -113,9 +112,8 @@ impl<'a> Issue<'a> {
         params: (&super::Database, &'a super::InDatabase<Run>),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
         let (_, run) = params;
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT
                     issues.id,
                     snippet_start,
@@ -128,12 +126,12 @@ impl<'a> Issue<'a> {
                 WHERE issues.run_id = ?
                 AND tags.severity != ?
                 ",
-            )?
-            .query_map(
-                (run.id, write_value!(Severity::Metadata)),
-                Self::map_row(params),
-            )?
-            .collect()
+        )?
+        .query_map(
+            (run.id, write_value!(Severity::Metadata)),
+            Self::map_row(params),
+        )?
+        .collect()
     }
 
     /// Remove all [Issue]s with an outdated [crate::parse::TagSet] schema from [super::Database]
@@ -141,7 +139,7 @@ impl<'a> Issue<'a> {
         db: &mut super::Database,
         current_schema: u64,
     ) -> rusqlite::Result<usize> {
-        let mut tx = db.conn.transaction()?;
+        let mut tx = db.transaction()?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
 
         // delete similarities first

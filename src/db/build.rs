@@ -63,9 +63,8 @@ impl Queryable for JobBuild {
 
 impl Upsertable for JobBuild {
     fn upsert(self, db: &super::Database, params: ()) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 INSERT INTO builds (
                     url,
                     status,
@@ -79,8 +78,8 @@ impl Upsertable for JobBuild {
                         timestamp = excluded.timestamp,
                         job_id = excluded.job_id
                 ",
-            )?
-            .execute(self.as_params(params)?)?;
+        )?
+        .execute(self.as_params(params)?)?;
 
         Self::select_one_by_job(db, self.job_id, self.number, ())
     }
@@ -94,20 +93,19 @@ impl JobBuild {
         number: u32,
         params: (),
     ) -> rusqlite::Result<super::InDatabase<Self>> {
-        db.conn
-            .prepare_cached(
-                "
+        db.prepare_cached(
+            "
                 SELECT * FROM builds
                 WHERE job_id = ?
                 AND number = ?
                 ",
-            )?
-            .query_one((job_id, number), Self::map_row(params))
+        )?
+        .query_one((job_id, number), Self::map_row(params))
     }
 
     /// Remove all [JobBuild]s which aren't referenced by [super::Job] from [super::Database]
     pub fn delete_all_orphan(db: &super::Database) -> rusqlite::Result<()> {
-        db.conn.execute_batch(
+        db.execute_batch(
             "
             BEGIN;
             DELETE FROM similarities WHERE similarity_hash IN (
