@@ -12,20 +12,23 @@ pub struct Config {
     /// Project to query for
     pub project: String,
 
+    /// Blocklist of jobs by name
+    pub blocklist: Vec<String>,
+
     /// Optional username
     pub username: Option<String>,
 
     /// Optional password
     pub password: Option<String>,
 
-    /// Sqlite3 database to cache build information
-    pub database: String,
+    /// Threshold for similarity calculation
+    pub threshold: f32,
 
     /// Timezone in UTC+`timezone`
     pub timezone: i8,
 
-    /// Blocklist of jobs by name
-    pub blocklist: Vec<String>,
+    /// Sqlite3 database to cache build information
+    pub database: String,
 
     /// List of custom [TagView] to be rendered
     pub view: Vec<TagView>,

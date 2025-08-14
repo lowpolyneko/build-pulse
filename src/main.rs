@@ -188,7 +188,7 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
 }
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
-fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
+fn calculate_similarities(db: &Mutex<Database>, threshold: f32) -> Result<()> {
     let runs = Run::select_all(&db.lock().unwrap(), ())?;
 
     // conservatively group by levenshtein distance
@@ -202,7 +202,7 @@ fn calculate_similarities(db: &Mutex<Database>) -> Result<()> {
         .for_each(|i| {
             match groups.par_iter_mut().find_any(|g| {
                 g.par_iter()
-                    .all(|i2| normalized_levenshtein_distance(i.snippet, i2.snippet) > 0.9)
+                    .all(|i2| normalized_levenshtein_distance(i.snippet, i2.snippet) > threshold)
             }) {
                 Some(g) => g.push(i),
                 None => groups.push(vec![i]),
@@ -314,7 +314,7 @@ fn main() -> Result<()> {
         TagInfo::delete_all_orphan(database.get_mut().unwrap())?;
 
         info!("Calculating issue similarities...");
-        calculate_similarities(&database)?;
+        calculate_similarities(&database, config.threshold)?;
     } else {
         info!("No runs to process.");
     }

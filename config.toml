@@ -8,10 +8,11 @@ blocklist = [
     "xfail-mpich-main-ch4-special-tests"
 ]
 
-timezone = -5 # in UTC-<hour> format
-
 # username = <OPTIONAL: your user>
 # password = <OPTIONAL: your password>
+
+threshold = 0.9
+timezone = -5 # in UTC-<hour> format
 
 database = "data.db"
 
