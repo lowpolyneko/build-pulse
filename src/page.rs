@@ -132,9 +132,9 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 }
             }
             td style="border: 1px solid black;" { // issues
-                @if let Ok(issues) = Issue::select_all(db, (db, run)) {
+                @if let Ok(issues) = Issue::select_all_not_metadata(db, (db, run)) {
                     @if !issues.is_empty() {
-                        @if let Ok(tags) = TagInfo::select_one_by_run(db, run, ()) {
+                        @if let Ok(tags) = TagInfo::select_all_by_run(db, run, ()) {
                             b {
                                 "Identified Tags: "
                             }

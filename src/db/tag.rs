@@ -84,7 +84,7 @@ impl Upsertable for TagInfo {
 }
 
 impl TagInfo {
-    /// Get all [TagInfo]s from [super::Database] by name
+    /// Get a [TagInfo] from [super::Database] by name
     pub fn select_one_by_name(
         db: &super::Database,
         name: &str,
@@ -95,7 +95,7 @@ impl TagInfo {
     }
 
     /// Get all [TagInfo]s from [Run]
-    pub fn select_one_by_run(
+    pub fn select_all_by_run(
         db: &super::Database,
         run: &super::InDatabase<Run>,
         params: (),
