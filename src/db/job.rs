@@ -60,13 +60,13 @@ impl Upsertable for Job {
             .execute(self.as_params(params)?)?;
 
         // get the job as a second query in-case of an insert conflict
-        Self::select_by_name(db, &self.name, ())
+        Self::select_one_by_name(db, &self.name, ())
     }
 }
 
 impl Job {
     /// Get a [Job] from [super::Database] by name
-    pub fn select_by_name(
+    pub fn select_one_by_name(
         db: &super::Database,
         name: &str,
         params: (),
@@ -82,7 +82,7 @@ impl Job {
     }
 
     /// Remove all [Job]s from [super::Database] by name
-    pub fn purge_by_blocklist(
+    pub fn delete_all_by_blocklist(
         db: &mut super::Database,
         names: &[String],
     ) -> rusqlite::Result<usize> {

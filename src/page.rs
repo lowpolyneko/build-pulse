@@ -30,7 +30,7 @@ where
 /// Render a [SparseJob]
 fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Markup> {
     let last_build = match job.last_build {
-        Some(n) => Some(JobBuild::select_by_job(db, job.id, n, ())?),
+        Some(n) => Some(JobBuild::select_one_by_job(db, job.id, n, ())?),
         None => None,
     };
     let sorted_runs = match &last_build {
@@ -134,7 +134,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
             td style="border: 1px solid black;" { // issues
                 @if let Ok(issues) = Issue::select_all(db, (db, run)) {
                     @if !issues.is_empty() {
-                        @if let Ok(tags) = TagInfo::select_by_run(db, run, ()) {
+                        @if let Ok(tags) = TagInfo::select_one_by_run(db, run, ()) {
                             b {
                                 "Identified Tags: "
                             }
@@ -290,7 +290,7 @@ fn render_similarities(db: &Database) -> Result<Markup> {
             "Related Issues"
         }
         table style="border: 1px solid black;" {
-            @for s in Similarity::select_all(db, ())? {
+            @for s in Similarity::query_all(db, ())? {
                 tr style="border: 1px solid black; background-color: lightgray" {
                     td style="border: 1px solid black;" {
                         code title=(s.tag.desc) {

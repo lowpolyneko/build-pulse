@@ -38,7 +38,7 @@ impl<'a>
         params: (&super::Database, &'a super::InDatabase<Run>),
     ) -> impl FnMut(&rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         let (db, run) = params;
-        move |row| {
+        |row| {
             let tag = TagInfo::select_one(db, row.get(4)?, ())?;
             Ok(super::InDatabase::new(
                 row.get(0)?,

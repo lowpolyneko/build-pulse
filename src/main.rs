@@ -270,7 +270,7 @@ fn main() -> Result<()> {
     }
 
     // purge blocklisted jobs
-    let blocked = Job::purge_by_blocklist(&mut database, &config.blocklist)?;
+    let blocked = Job::delete_all_by_blocklist(&mut database, &config.blocklist)?;
     if blocked > 0 {
         warn!("Purged {blocked} jobs that are on the blocklist.");
     }
@@ -308,10 +308,10 @@ fn main() -> Result<()> {
 
         // purge old data
         info!("Purging old runs...");
-        JobBuild::purge_old(database.get_mut().unwrap())?;
+        JobBuild::delete_all_orphan(database.get_mut().unwrap())?;
 
         info!("Purging extraneous tags...");
-        TagInfo::purge_orphans(database.get_mut().unwrap())?;
+        TagInfo::delete_all_orphan(database.get_mut().unwrap())?;
 
         info!("Calculating issue similarities...");
         calculate_similarities(&database)?;

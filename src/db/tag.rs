@@ -80,13 +80,13 @@ impl Upsertable for TagInfo {
             )?
             .execute(self.as_params(params)?)?;
 
-        Self::select_by_name(db, &self.name, ())
+        Self::select_one_by_name(db, &self.name, ())
     }
 }
 
 impl TagInfo {
     /// Get all [TagInfo]s from [super::Database] by name
-    pub fn select_by_name(
+    pub fn select_one_by_name(
         db: &super::Database,
         name: &str,
         params: (),
@@ -97,7 +97,7 @@ impl TagInfo {
     }
 
     /// Get all [TagInfo]s from [Run]
-    pub fn select_by_run(
+    pub fn select_one_by_run(
         db: &super::Database,
         run: &super::InDatabase<Run>,
         params: (),
@@ -129,7 +129,7 @@ impl TagInfo {
     }
 
     /// Remove all [Tag]s which aren't referenced by [super::Issue]s from [super::Database]
-    pub fn purge_orphans(db: &super::Database) -> rusqlite::Result<usize> {
+    pub fn delete_all_orphan(db: &super::Database) -> rusqlite::Result<usize> {
         db.conn.execute(
             "
             DELETE FROM tags WHERE NOT EXISTS (

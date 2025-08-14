@@ -62,7 +62,7 @@ impl Queryable for JobBuild {
 }
 
 impl Upsertable for JobBuild {
-    fn upsert(self, db: &super::Database, _: ()) -> rusqlite::Result<super::InDatabase<Self>> {
+    fn upsert(self, db: &super::Database, params: ()) -> rusqlite::Result<super::InDatabase<Self>> {
         db.conn
             .prepare_cached(
                 "
@@ -80,19 +80,19 @@ impl Upsertable for JobBuild {
                         job_id = excluded.job_id
                 ",
             )?
-            .execute(self.as_params(())?)?;
+            .execute(self.as_params(params)?)?;
 
-        Self::select_by_job(db, self.job_id, self.number, ())
+        Self::select_one_by_job(db, self.job_id, self.number, ())
     }
 }
 
 impl JobBuild {
     /// Get a [JobBuild] from [super::Database] by [super::Job] id and build number
-    pub fn select_by_job(
+    pub fn select_one_by_job(
         db: &super::Database,
         job_id: i64,
         number: u32,
-        _: (),
+        params: (),
     ) -> rusqlite::Result<super::InDatabase<Self>> {
         db.conn
             .prepare_cached(
@@ -102,11 +102,11 @@ impl JobBuild {
                 AND number = ?
                 ",
             )?
-            .query_one((job_id, number), Self::map_row(()))
+            .query_one((job_id, number), Self::map_row(params))
     }
 
     /// Remove all [JobBuild]s which aren't referenced by [super::Job] from [super::Database]
-    pub fn purge_old(db: &super::Database) -> rusqlite::Result<()> {
+    pub fn delete_all_orphan(db: &super::Database) -> rusqlite::Result<()> {
         db.conn.execute_batch(
             "
             BEGIN;

@@ -44,7 +44,7 @@ impl Queryable for SimilarityInfo {
 }
 
 impl Similarity {
-    pub fn select_all(db: &super::Database, _: ()) -> rusqlite::Result<Vec<Self>> {
+    pub fn query_all(db: &super::Database, _: ()) -> rusqlite::Result<Vec<Self>> {
         let mut hm: HashMap<u64, Self> = HashMap::new();
         db.conn
             .prepare_cached(
