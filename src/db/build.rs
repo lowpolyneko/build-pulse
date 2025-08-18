@@ -123,6 +123,13 @@ impl JobBuild {
                 JOIN jobs ON jobs.id = builds.job_id
                 WHERE number != last_build
             );
+            DELETE FROM artifacts WHERE id IN (
+                SELECT artifacts.id FROM artifacts
+                JOIN runs ON runs.id = artifacts.run_id
+                JOIN builds ON builds.id = runs.build_id
+                JOIN jobs ON jobs.id = builds.job_id
+                WHERE number != last_build
+            );
             DELETE FROM runs WHERE id IN (
                 SELECT runs.id FROM runs
                 JOIN builds ON builds.id = runs.build_id
