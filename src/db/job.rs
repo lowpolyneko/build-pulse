@@ -117,6 +117,20 @@ impl Job {
                 (name,),
             )?;
 
+            // then artifacts
+            tx.execute(
+                "
+                DELETE FROM artifacts WHERE id IN (
+                    SELECT artifacts.id FROM artifacts
+                    JOIN runs ON runs.id = artifacts.run_id
+                    JOIN builds ON builds.id = runs.build_id
+                    JOIN jobs ON jobs.id = builds.job_id
+                    WHERE name = ?
+                );
+                ",
+                (name,),
+            )?;
+
             // then runs
             tx.execute(
                 "
