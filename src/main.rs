@@ -7,7 +7,10 @@ use std::{
 use anyhow::{Error, Result};
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
-use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
+use jenkins_api::{
+    Jenkins, JenkinsBuilder,
+    build::{Build, BuildStatus},
+};
 use log::{Level, info, log, warn};
 use time::UtcOffset;
 use tokio::{
@@ -19,8 +22,8 @@ use crate::{
     api::{AsBuild, AsJob, AsRun, SparseBuild, SparseMatrixProject},
     config::{Config, Field, Severity},
     db::{
-        Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, SimilarityInfo, TagInfo,
-        Upsertable,
+        Artifact, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, SimilarityInfo,
+        TagInfo, Upsertable,
     },
     parse::{Tag, TagSet, normalized_levenshtein_distance},
 };
@@ -53,6 +56,7 @@ struct Args {
 /// Pull builds from `project.jobs` and cache them into database `db`
 async fn pull_build_logs(
     project: SparseMatrixProject,
+    artifacts: Arc<[String]>,
     blocklist: &[String],
     jenkins: Arc<Jenkins>,
     db: &Database,
@@ -88,15 +92,21 @@ async fn pull_build_logs(
             } // cached
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 let jenkins = jenkins.clone();
+                let artifacts = artifacts.clone();
                 let job = job.clone();
                 let build = build.clone();
                 handles.spawn(async move {
-                    let run = mb
-                        .get_full_build(&jenkins)
-                        .await
-                        .unwrap()
-                        .as_run(build.id, &jenkins)
-                        .await;
+                    let full_build = mb.get_full_build(&jenkins).await.unwrap();
+                    let run = full_build.as_run(build.id, &jenkins).await;
+
+                    let mut blobs = Vec::new();
+                    for a in &full_build.artifacts {
+                        if artifacts.contains(&a.relative_path)
+                            && let Ok(blob) = full_build.get_artifact(&jenkins, a).await
+                        {
+                            blobs.push((a.relative_path.clone(), blob));
+                        }
+                    }
 
                     log!(
                         match run.status {
@@ -110,7 +120,7 @@ async fn pull_build_logs(
                         run.status
                     );
 
-                    run
+                    (run, blobs)
                 });
 
                 Ok(())
@@ -123,7 +133,20 @@ async fn pull_build_logs(
 
     // collect them all here
     while let Some(h) = handles.join_next().await {
-        runs.push(h?.upsert(db, ())?);
+        let (run, blobs) = h?;
+        let run = run.upsert(db, ())?;
+        blobs.into_iter().try_for_each(|(p, b)| {
+            Artifact {
+                path: p,
+                contents: b.into(),
+                run_id: run.id,
+            }
+            .insert(db, ())?;
+
+            Ok::<_, Error>(())
+        })?;
+
+        runs.push(run);
     }
 
     Ok(runs)
@@ -291,6 +314,7 @@ async fn main() -> Result<()> {
     // load config
     info!("Compiling issue patterns...");
     let Config {
+        artifact,
         blocklist,
         database,
         jenkins_url,
@@ -347,7 +371,18 @@ async fn main() -> Result<()> {
     info!("----------------------------------------");
 
     let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
-    let runs = pull_build_logs(project, &blocklist, jenkins.into(), &database).await?;
+    let runs = pull_build_logs(
+        project,
+        artifact
+            .into_iter()
+            .map(|a| a.path)
+            .collect::<Vec<_>>()
+            .into(),
+        &blocklist,
+        jenkins.into(),
+        &database,
+    )
+    .await?;
 
     info!("Done!");
     info!("----------------------------------------");

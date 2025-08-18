@@ -30,11 +30,21 @@ pub struct Config {
     /// Sqlite3 database to cache build information
     pub database: String,
 
+    /// List of [ConfigArtiface] to retrieve
+    pub artifact: Vec<ConfigArtifact>,
+
     /// List of custom [TagView] to be rendered
     pub view: Vec<TagView>,
 
     /// [Vec] of [ConfigTag] to be parsed as [crate::parse::TagSet]
     pub tag: Vec<ConfigTag>,
+}
+
+/// Represents one [crate::db::Artifact] to retrieve
+#[derive(Deserialize)]
+pub struct ConfigArtifact {
+    /// Path to the artifact
+    pub path: String,
 }
 
 /// Represesnts one [crate::parse::Tag] view to be rendered
