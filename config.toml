@@ -30,6 +30,11 @@ expr = 'S"Metadata"'
 name = "Jenkins Failures By Platform"
 expr = 't"jenkins_agent_offline" && T"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|(softiron-[0-9]+)"'
 
+### ARTIFACTS
+### ----------------------------------------------------------------------
+[[artifact]]
+path = "top.txt"
+
 ### FATAL TOOLING EMITS
 ### ----------------------------------------------------------------------
 [[tag]]
