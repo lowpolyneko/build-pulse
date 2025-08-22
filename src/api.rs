@@ -54,7 +54,7 @@ pub struct SparseBuild {
 /// Builds that can be represented as [Run]
 pub trait AsRun {
     /// Convert `&self` to [Run]
-    fn as_run(&self, build_id: i64, jenkins_client: &Jenkins) -> Run;
+    async fn as_run(&self, build_id: i64, jenkins_client: &Jenkins) -> Run;
 }
 
 /// Builds that can be represented as [JobBuild]
@@ -132,7 +132,7 @@ impl<T> AsRun for T
 where
     T: Build + HasBuildFields,
 {
-    fn as_run(&self, build_id: i64, jenkins_client: &Jenkins) -> Run {
+    async fn as_run(&self, build_id: i64, jenkins_client: &Jenkins) -> Run {
         let display_name = self.full_display_name_or_default();
         let status = self.build_status();
         Run {
@@ -142,7 +142,7 @@ where
             log: match status {
                 Some(BuildStatus::Failure | BuildStatus::Unstable) => {
                     // only get log on failure
-                    match self.get_console(jenkins_client) {
+                    match self.get_console(jenkins_client).await {
                         Ok(l) => Some(l.into()),
                         Err(e) => {
                             log::error!("Failed to retrieve build log for run {display_name}: {e}");
@@ -160,7 +160,7 @@ where
 
 impl SparseMatrixProject {
     /// Query the Jenkins build server for all jobs and their last build from a `project_name`
-    pub fn pull_jobs(client: &Jenkins, project_name: &str) -> Result<Self> {
+    pub async fn pull_jobs(client: &Jenkins, project_name: &str) -> Result<Self> {
         client
             .get_object_as(
                 Path::View { name: project_name },
@@ -185,6 +185,7 @@ impl SparseMatrixProject {
                     )
                     .build(),
             )
+            .await
             .map_err(Error::from_boxed)
     }
 }
