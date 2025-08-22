@@ -169,7 +169,7 @@ fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) 
         .try_for_each(|(run, t, i)| {
             let i = {
                 let db = &db.lock().unwrap();
-                i.insert(db, (db, run))
+                i.insert(db, (run,))
             }?;
 
             if !matches!(t.severity, Severity::Metadata) {
@@ -202,7 +202,7 @@ fn calculate_similarities(db: &Mutex<Database>, threshold: f32) -> Result<()> {
         .for_each(|i| {
             match groups.par_iter_mut().find_any(|g| {
                 g.par_iter()
-                    .all(|i2| normalized_levenshtein_distance(i.snippet, i2.snippet) > threshold)
+                    .all(|i2| normalized_levenshtein_distance(&i.snippet, &i2.snippet) > threshold)
             }) {
                 Some(g) => g.push(i),
                 None => groups.push(vec![i]),

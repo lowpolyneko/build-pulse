@@ -138,15 +138,17 @@ where
         Run {
             url: self.url().to_string(),
             status,
-            display_name: display_name.to_string(),
+            display_name: display_name.into(),
             log: match status {
                 Some(BuildStatus::Failure | BuildStatus::Unstable) => {
                     // only get log on failure
-                    self.get_console(jenkins_client)
-                        .map_err(|e| {
-                            log::error!("Failed to retrieve build log for run {display_name}: {e}")
-                        })
-                        .ok()
+                    match self.get_console(jenkins_client) {
+                        Ok(l) => Some(l.into()),
+                        Err(e) => {
+                            log::error!("Failed to retrieve build log for run {display_name}: {e}");
+                            None
+                        }
+                    }
                 }
                 _ => None,
             },
