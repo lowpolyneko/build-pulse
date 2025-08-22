@@ -2,7 +2,7 @@
 use std::{
     fs,
     hash::{DefaultHasher, Hash, Hasher},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use anyhow::{Error, Result};
@@ -124,38 +124,57 @@ async fn pull_build_logs(
 }
 
 /// Parse all untagged runs for `tags` and cache them into database `db`
-fn parse_unprocessed_runs(tags: &TagSet<InDatabase<Tag>>, db: &Mutex<Database>) -> Result<()> {
-    let runs = Run::select_all(&db.lock().unwrap(), ())?;
+async fn parse_unprocessed_runs(
+    runs: Vec<InDatabase<Run>>,
+    tags: Arc<TagSet<InDatabase<Tag>>>,
+    db: &Database,
+) -> Result<()> {
+    let mut handles = JoinSet::new();
 
-    runs.par_iter()
-        .flat_map_iter(|run| Field::iter().map(move |f| (run, f))) // parse all fields
-        .filter_map(|(run, field)| match (run.tag_schema, &run.log, field) {
-            (None, Some(log), Field::Console) => Some((run, field, log)),
-            (None, Some(_), Field::RunName) => Some((run, field, &run.display_name)),
-            _ => None,
-        })
-        .flat_map_iter(|(run, field, data)| {
-            tags.grep_tags(data, field).map(move |t| (run, data, t))
-        })
-        .flat_map_iter(|(run, data, t)| t.grep_issue(data).map(move |i| (run, t, i)))
-        .try_for_each(|(run, t, i)| {
-            let i = {
-                let db = &db.lock().unwrap();
-                i.insert(db, (run,))
-            }?;
+    runs.into_iter().for_each(|run| match run.tag_schema {
+        None => {
+            let tags = tags.clone();
+            handles.spawn_blocking(move || -> (_, Vec<_>) {
+                let issues = {
+                    let warn = |t: &InDatabase<Tag>| {
+                        if !matches!(t.severity, Severity::Metadata) {
+                            warn!(
+                                "Found issue(s) tagged '{}' in run '{}'",
+                                t.name, run.display_name
+                            );
+                        }
+                    };
+                    let run_name =
+                        tags.grep_tags(&run.display_name, Field::RunName)
+                            .flat_map(|t| {
+                                warn(t);
+                                t.grep_issue(&run.display_name)
+                            });
+                    let console = run.log.iter().flat_map(|l| {
+                        tags.grep_tags(l, Field::Console).flat_map(|t| {
+                            warn(t);
+                            t.grep_issue(l)
+                        })
+                    });
 
-            if !matches!(t.severity, Severity::Metadata) {
-                warn!(
-                    "Found issue '#{}' tagged '{}' in run '{}'",
-                    i.id, t.name, run.display_name
-                );
-            }
+                    run_name.chain(console).collect()
+                };
 
-            Ok::<_, Error>(())
-        })?;
+                (run, issues)
+            });
+        }
+        _ => {}
+    });
+
+    while let Some(h) = handles.join_next().await {
+        let (run, issues) = h?;
+        issues
+            .into_iter()
+            .try_for_each(|i| i.insert(db, (&run,)).map(|_| ()))?;
+    }
 
     // batch update tag schema for runs afterwards
-    Run::update_all_tag_schema(&db.lock().unwrap(), Some(tags.schema()))?;
+    Run::update_all_tag_schema(&db, Some(tags.schema()))?;
     Ok(())
 }
 
@@ -219,12 +238,23 @@ async fn main() -> Result<()> {
 
     // load config
     info!("Compiling issue patterns...");
-    let config: Config = toml::from_str(&fs::read_to_string(args.config)?)?;
-    let tags = TagSet::from_config(&config.tag)?;
+    let Config {
+        blocklist,
+        database,
+        jenkins_url,
+        password,
+        project,
+        tag: tags,
+        threshold,
+        timezone,
+        username,
+        view,
+    } = toml::from_str(&fs::read_to_string(args.config)?)?;
+    let tags = TagSet::from_config(tags)?;
 
     // open db
     info!("Opening database...");
-    let mut database = Database::open(&config.database)?;
+    let mut database = Database::open(&database)?;
 
     // check for cache purge
     if args.purge_cache {
@@ -243,19 +273,19 @@ async fn main() -> Result<()> {
     }
 
     // purge blocklisted jobs
-    let blocked = Job::delete_all_by_blocklist(&mut database, &config.blocklist)?;
+    let blocked = Job::delete_all_by_blocklist(&mut database, &blocklist)?;
     if blocked > 0 {
         warn!("Purged {blocked} jobs that are on the blocklist.");
     }
 
     info!(
         "Pulling associated jobs for {} from {}...",
-        config.project, config.jenkins_url
+        project, jenkins_url
     );
 
-    let jenkins = JenkinsBuilder::new(&config.jenkins_url);
-    let jenkins = match config.username {
-        Some(user) => jenkins.with_user(&user, config.password.as_deref()),
+    let jenkins = JenkinsBuilder::new(&jenkins_url);
+    let jenkins = match username {
+        Some(user) => jenkins.with_user(&user, password.as_deref()),
         None => jenkins,
     }
     .build()
@@ -264,29 +294,29 @@ async fn main() -> Result<()> {
     info!("Pulling build info for each job...");
     info!("----------------------------------------");
 
-    let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project).await?;
-    let _runs = pull_build_logs(project, &config.blocklist, jenkins.into(), &database).await?;
+    let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
+    let runs = pull_build_logs(project, &blocklist, jenkins.into(), &database).await?;
 
     info!("Done!");
     info!("----------------------------------------");
 
-    let mut database = Mutex::new(database);
-    if Run::has_untagged(database.get_mut().unwrap())? {
+    if Run::has_untagged(&database)? {
         info!("Parsing unprocessed run logs...");
-        parse_unprocessed_runs(&tags, &database)?;
+        parse_unprocessed_runs(runs, tags.into(), &database).await?;
 
         info!("Done!");
         info!("----------------------------------------");
 
         // purge old data
         info!("Purging old runs...");
-        JobBuild::delete_all_orphan(database.get_mut().unwrap())?;
+
+        JobBuild::delete_all_orphan(&database)?;
 
         info!("Purging extraneous tags...");
-        TagInfo::delete_all_orphan(database.get_mut().unwrap())?;
+        TagInfo::delete_all_orphan(&database)?;
 
         info!("Calculating issue similarities...");
-        calculate_similarities(&database, config.threshold)?;
+        calculate_similarities(&database, threshold)?;
     } else {
         info!("No runs to process.");
     }
@@ -294,17 +324,11 @@ async fn main() -> Result<()> {
     info!("Done!");
     info!("----------------------------------------");
 
-    let database = database.into_inner().unwrap();
-
     if let Some(output) = args.output {
         info!("Generating report...");
 
-        let markup = page::render(
-            &database,
-            &config.view,
-            UtcOffset::from_hms(config.timezone, 0, 0)?,
-        )?
-        .into_string();
+        let markup =
+            page::render(&database, &view, UtcOffset::from_hms(timezone, 0, 0)?)?.into_string();
 
         if let Some(filepath) = output {
             fs::write(&filepath, markup)?;
