@@ -115,6 +115,8 @@ async fn pull_build_logs(
         })?;
     }
 
+    runs.reserve_exact(handles.len());
+
     // collect them all here
     while let Some(h) = handles.join_next().await {
         runs.push(h?.upsert(db, ())?);
@@ -128,7 +130,7 @@ async fn parse_unprocessed_runs(
     runs: Vec<InDatabase<Run>>,
     tags: Arc<TagSet<InDatabase<Tag>>>,
     db: &Database,
-) -> Result<()> {
+) -> Result<Vec<InDatabase<Issue>>> {
     let mut handles = JoinSet::new();
 
     runs.into_iter().for_each(|run| match run.tag_schema {
@@ -136,13 +138,12 @@ async fn parse_unprocessed_runs(
             let tags = tags.clone();
             handles.spawn_blocking(move || -> (_, Vec<_>) {
                 let issues = {
-                    let warn = |t: &InDatabase<Tag>| {
-                        if !matches!(t.severity, Severity::Metadata) {
-                            warn!(
-                                "Found issue(s) tagged '{}' in run '{}'",
-                                t.name, run.display_name
-                            );
-                        }
+                    let warn = |t: &InDatabase<Tag>| match t.severity {
+                        Severity::Metadata => {}
+                        _ => warn!(
+                            "Found issue(s) tagged '{}' in run '{}'",
+                            t.name, run.display_name
+                        ),
                     };
                     let run_name =
                         tags.grep_tags(&run.display_name, Field::RunName)
@@ -166,30 +167,36 @@ async fn parse_unprocessed_runs(
         _ => {}
     });
 
+    let mut inserted_issues = Vec::new();
     while let Some(h) = handles.join_next().await {
         let (run, issues) = h?;
-        issues
-            .into_iter()
-            .try_for_each(|i| i.insert(db, (&run,)).map(|_| ()))?;
+        inserted_issues = issues.into_iter().try_fold(inserted_issues, |mut acc, i| {
+            acc.push(i.insert(db, (&run,))?);
+            Ok::<_, Error>(acc)
+        })?;
     }
 
     // batch update tag schema for runs afterwards
     Run::update_all_tag_schema(&db, Some(tags.schema()))?;
-    Ok(())
+    Ok(inserted_issues)
 }
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
-fn calculate_similarities(db: &Mutex<Database>, threshold: f32) -> Result<()> {
-    let runs = Run::select_all(&db.lock().unwrap(), ())?;
-
+async fn calculate_similarities(
+    issues: Vec<InDatabase<Issue>>,
+    threshold: f32,
+    db: &Database,
+) -> Result<()> {
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<InDatabase<Issue>>> = Vec::new();
-    runs.iter()
-        .filter_map(|r| {
-            let db = &db.lock().unwrap();
-            Issue::select_all_not_metadata(db, (db, r)).ok()
-        })
-        .flatten()
+    issues
+        .into_iter()
+        .filter_map(
+            |i| match TagInfo::select_one(db, i.tag_id, ()).map(|t| t.severity) {
+                Ok(Severity::Metadata) | Err(_) => None,
+                Ok(_) => Some(i),
+            },
+        )
         .for_each(|i| {
             match groups.par_iter_mut().find_any(|g| {
                 g.par_iter()
