@@ -1,3 +1,4 @@
+use arcstr::ArcStr;
 use jenkins_api::build::BuildStatus;
 
 use crate::{
@@ -16,10 +17,10 @@ pub struct Run {
     pub status: Option<BuildStatus>,
 
     /// Run `display_name`
-    pub display_name: String,
+    pub display_name: ArcStr,
 
     /// Full console log
-    pub log: Option<String>,
+    pub log: Option<ArcStr>,
 
     /// Schema [Run] was parsed with
     pub tag_schema: Option<u64>,
@@ -48,8 +49,8 @@ impl Queryable for Run {
                 Run {
                     url: row.get(1)?,
                     status: read_value!(row, 2),
-                    display_name: row.get(3)?,
-                    log: row.get(4)?,
+                    display_name: row.get::<_, String>(3)?.into(),
+                    log: row.get::<_, Option<String>>(4)?.map(ArcStr::from),
                     tag_schema: row.get::<_, Option<i64>>(5)?.map(i64::cast_unsigned),
                     build_id: row.get(6)?,
                 },
@@ -61,8 +62,8 @@ impl Queryable for Run {
         Ok((
             &self.url,
             write_value!(self.status),
-            &self.display_name,
-            &self.log,
+            self.display_name.as_str(),
+            self.log.as_ref().map(|s| s.as_str()),
             self.tag_schema.map(u64::cast_signed),
             self.build_id,
         ))

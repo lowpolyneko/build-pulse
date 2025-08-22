@@ -22,3 +22,4 @@ time = { version = "0.3.41", features = ["formatting", "macros"] }
 serde_json = "1.0.140"
 chumsky = { version = "0.10.1", features = ["pratt"] }
 rusqlite_regex = "0.6.0"
+arcstr = "1.2.0"

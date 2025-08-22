@@ -1,3 +1,5 @@
+use arcstr::Substr;
+
 use crate::{
     config::{Field, Severity},
     db::{Queryable, Run, TagInfo},
@@ -6,9 +8,9 @@ use crate::{
 
 /// [Issue] stored in [super::Database]
 #[derive(PartialEq, Eq, Hash)]
-pub struct Issue<'a> {
+pub struct Issue {
     /// String snippet from [Run]
-    pub snippet: &'a str,
+    pub snippet: Substr,
 
     /// [crate::parse::Tag] associated with [Issue]
     pub tag_id: i64,
@@ -18,7 +20,7 @@ pub struct Issue<'a> {
 }
 
 schema! {
-    issues for Issue<'a> {
+    issues for Issue {
         id              INTEGER PRIMARY KEY,
         snippet_start   INTEGER NOT NULL,
         snippet_end     INTEGER NOT NULL,
@@ -28,28 +30,22 @@ schema! {
     }
 }
 
-impl<'a>
-    Queryable<
-        (&super::Database, &'a super::InDatabase<Run>),
-        (&super::Database, &'a super::InDatabase<Run>),
-    > for Issue<'a>
-{
+impl Queryable<(&super::Database, &super::InDatabase<Run>), (&super::InDatabase<Run>,)> for Issue {
     fn map_row(
-        params: (&super::Database, &'a super::InDatabase<Run>),
+        params: (&super::Database, &super::InDatabase<Run>),
     ) -> impl FnMut(&rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         let (db, run) = params;
         |row| {
-            let tag = TagInfo::select_one(db, row.get(4)?, ())?;
+            let tag_id = row.get(4)?;
             Ok(super::InDatabase::new(
                 row.get(0)?,
                 Self {
-                    snippet: match tag.field {
+                    snippet: match TagInfo::select_one(db, tag_id, ())?.field {
                         Field::Console => run.log.as_ref().ok_or(rusqlite::Error::InvalidQuery)?,
                         Field::RunName => &run.display_name,
                     }
-                    .get(row.get(1)?..row.get(2)?)
-                    .ok_or(rusqlite::Error::InvalidQuery)?,
-                    tag_id: tag.id,
+                    .substr(row.get::<_, usize>(1)?..row.get::<_, usize>(2)?),
+                    tag_id,
                     duplicates: row.get(5).map(i64::cast_unsigned)?,
                 },
             ))
@@ -58,20 +54,10 @@ impl<'a>
 
     fn as_params(
         &self,
-        params: (&super::Database, &super::InDatabase<Run>),
+        params: (&super::InDatabase<Run>,),
     ) -> rusqlite::Result<impl rusqlite::Params> {
-        let (db, run) = params;
-        let log = match TagInfo::select_one(db, self.tag_id, ())?.field {
-            Field::Console => run.log.as_ref().ok_or(rusqlite::Error::InvalidQuery)?,
-            Field::RunName => &run.display_name,
-        }
-        .as_ptr();
-        let start = unsafe {
-            // SAFETY: [Run] owns all underlying [Issue]s
-            self.snippet.as_ptr().offset_from_unsigned(log)
-        };
-        let end = start + self.snippet.len();
-
+        let (run,) = params;
+        let core::ops::Range::<_> { start, end } = self.snippet.range();
         Ok((
             start,
             end,
@@ -83,7 +69,7 @@ impl<'a>
 
     fn select_all(
         db: &super::Database,
-        params: (&super::Database, &'a super::InDatabase<Run>),
+        params: (&super::Database, &super::InDatabase<Run>),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
         let (_, run) = params;
         db.prepare_cached(
@@ -105,11 +91,11 @@ impl<'a>
     }
 }
 
-impl<'a> Issue<'a> {
+impl Issue {
     /// Get all [Issue]s from [super::Database] that aren't [Severity::Metadata]
     pub fn select_all_not_metadata(
         db: &super::Database,
-        params: (&super::Database, &'a super::InDatabase<Run>),
+        params: (&super::Database, &super::InDatabase<Run>),
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
         let (_, run) = params;
         db.prepare_cached(

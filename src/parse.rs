@@ -5,6 +5,7 @@ use std::{
     ops::Deref,
 };
 
+use arcstr::ArcStr;
 use regex::{Regex, RegexSet};
 
 use crate::{
@@ -128,12 +129,12 @@ impl<T> TagSet<T> {
 
 impl<'a> InDatabase<Tag<'a>> {
     /// Grep `field` for [Issue]s
-    pub fn grep_issue(&'a self, field: &'a str) -> impl Iterator<Item = Issue<'a>> {
+    pub fn grep_issue(&'a self, field: &ArcStr) -> impl Iterator<Item = Issue> {
         let mut hm: HashMap<Issue, u64> = HashMap::new();
         self.regex
             .find_iter(field)
             .map(|m| Issue {
-                snippet: m.as_str(),
+                snippet: field.substr_from(m.into()),
                 tag_id: self.id,
                 duplicates: 0,
             })

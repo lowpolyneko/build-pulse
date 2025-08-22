@@ -80,7 +80,7 @@ impl Similarity {
                             (db, &Run::select_one(db, run_id, ())?),
                         )?
                         .snippet
-                        .to_owned(),
+                        .to_string(),
                     }
                 })
                 .related
