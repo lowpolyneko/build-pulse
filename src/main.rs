@@ -2,7 +2,7 @@
 use std::{
     fs,
     hash::{DefaultHasher, Hash, Hasher},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::{Error, Result};
@@ -12,9 +12,10 @@ use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
 use log::{Level, info, log, warn};
 use rayon::prelude::*;
 use time::UtcOffset;
+use tokio::task::JoinSet;
 
 use crate::{
-    api::{AsBuild, AsJob, AsRun, SparseMatrixProject},
+    api::{AsBuild, AsJob, AsRun, SparseBuild, SparseMatrixProject},
     config::{Config, Field, Severity},
     db::{
         Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, SimilarityInfo, TagInfo,
@@ -49,106 +50,77 @@ struct Args {
 }
 
 /// Pull builds from `project.jobs` and cache them into database `db`
-fn pull_build_logs(
-    project: &SparseMatrixProject,
+async fn pull_build_logs(
+    project: SparseMatrixProject,
     blocklist: &[String],
-    jenkins: &Jenkins,
-    db: &Mutex<Database>,
-) -> Result<()> {
-    project
-        .jobs
-        .par_iter()
-        .filter(|job| !blocklist.contains(&job.name))
-        .filter_map(|job| {
-            // filter out jobs with no builds
-            job.last_build.as_ref().map_or_else(
-                || {
-                    info!("Job '{}' has no builds.", job.name);
-                    None
-                },
-                |build| Some((job, build)),
-            )
-        })
-        .filter_map(|(job, build)| {
-            build
-                .runs
-                .as_ref()
-                .map(|r| r.par_iter().map(move |mb| (job, build, mb)))
-        })
-        .flatten()
-        .filter(|(_, build, mb)| mb.number == build.number) // filter out runs w/o matching build
-        .map(|(job, build, mb)| {
-            Ok((
-                job.as_job()
-                    .upsert(&db.lock().unwrap(), ())
-                    .map_err(Error::from)?,
-                build,
-                mb,
-            ))
-        })
-        .map(|res| match res {
-            Ok((db_job, build, mb)) => {
-                let job_id = db_job.id;
-                Ok((
-                    db_job,
-                    build
-                        .as_build(job_id)
-                        .upsert(&db.lock().unwrap(), ())
-                        .map_err(Error::from)?,
-                    mb,
-                ))
+    jenkins: Arc<Jenkins>,
+    db: &Database,
+) -> Result<Vec<InDatabase<Run>>> {
+    let mut handles = JoinSet::new();
+    let mut runs = Vec::new();
+
+    // spawn tasks to pull builds
+    for sj in project.jobs {
+        let job: Arc<_> = match blocklist.contains(&sj.name) {
+            false => sj.as_job().upsert(&db, ())?.into(),
+            true => continue,
+        };
+        let (build, mut mbs): (Arc<_>, _) = match sj.last_build {
+            Some(build @ SparseBuild { runs: Some(_), .. }) => (
+                build.as_build(job.id).upsert(&db, ())?.into(),
+                build
+                    .runs
+                    .into_iter()
+                    .flatten()
+                    .filter(move |mb| mb.number == build.number),
+            ),
+            _ => {
+                info!("Job '{}' has no builds.", job.name);
+                continue;
             }
-            Err(e) => Err(e),
-        })
-        .filter_map(|res| match res {
-            Ok((db_job, db_build, mb)) => {
-                match Run::select_one_by_url(&db.lock().unwrap(), &mb.url, ()) {
-                    Ok(_) => None, // cached
-                    Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok((db_job, db_build, mb))),
-                    Err(e) => Some(Err(Error::from(e))),
-                }
-            }
-            Err(e) => Some(Err(e)),
-        })
-        .map(|res| match res {
-            Ok((db_job, db_build, mb)) => Ok((
-                db_job,
-                db_build,
-                mb.get_full_build(jenkins).map_err(Error::from_boxed)?,
-            )),
-            Err(e) => Err(e),
-        })
-        .map(|res| match res {
-            Ok((db_job, db_build, full_mb)) => {
-                let build_id = db_build.id;
-                Ok((db_job, db_build, full_mb.as_run(build_id, jenkins))) // build log is pulled here
-            }
-            Err(e) => Err(e),
-        })
-        .map(|res| match res {
-            Ok((db_job, db_build, run)) => {
-                Ok((db_job, db_build, run.upsert(&db.lock().unwrap(), ())?))
-            }
-            Err(e) => Err(e),
-        })
-        .try_for_each(|res| match res {
-            Ok((db_job, db_build, db_run)) => {
-                log!(
-                    match db_run.status {
-                        Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
-                        _ => Level::Info,
-                    },
-                    "Job '{}#{}' run '{}' finished with status {:?}.",
-                    db_job.name,
-                    db_build.number,
-                    db_run.display_name,
-                    db_run.status
-                );
+        };
+
+        mbs.try_for_each(|mb| match Run::select_one_by_url(&db, &mb.url, ()) {
+            Ok(run) => Ok(runs.push(run)), // cached
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                let jenkins = jenkins.clone();
+                let job = job.clone();
+                let build = build.clone();
+                handles.spawn(async move {
+                    let run = mb
+                        .get_full_build(&jenkins)
+                        .await
+                        .unwrap()
+                        .as_run(build.id, &jenkins)
+                        .await;
+
+                    log!(
+                        match run.status {
+                            Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
+                            _ => Level::Info,
+                        },
+                        "Job '{}#{}' run '{}' finished with status {:?}.",
+                        job.name,
+                        build.number,
+                        run.display_name,
+                        run.status
+                    );
+
+                    run
+                });
 
                 Ok(())
             }
-            Err(e) => Err(e),
-        })
+            Err(e) => return Err(Error::from(e)),
+        })?;
+    }
+
+    // collect them all here
+    while let Some(h) = handles.join_next().await {
+        runs.push(h?.upsert(db, ())?);
+    }
+
+    Ok(runs)
 }
 
 /// Parse all untagged runs for `tags` and cache them into database `db`
@@ -237,7 +209,8 @@ fn calculate_similarities(db: &Mutex<Database>, threshold: f32) -> Result<()> {
         })
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // initialize logging
@@ -291,14 +264,13 @@ fn main() -> Result<()> {
     info!("Pulling build info for each job...");
     info!("----------------------------------------");
 
-    let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project)?;
-
-    let mut database = Mutex::new(database);
-    pull_build_logs(&project, &config.blocklist, &jenkins, &database)?;
+    let project = SparseMatrixProject::pull_jobs(&jenkins, &config.project).await?;
+    let _runs = pull_build_logs(project, &config.blocklist, jenkins.into(), &database).await?;
 
     info!("Done!");
     info!("----------------------------------------");
 
+    let mut database = Mutex::new(database);
     if Run::has_untagged(database.get_mut().unwrap())? {
         info!("Parsing unprocessed run logs...");
         parse_unprocessed_runs(&tags, &database)?;
