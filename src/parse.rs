@@ -23,33 +23,33 @@ pub struct TagSet<T> {
 }
 
 /// [Tag] that can be parsed for [Issue]s
-pub struct Tag<'a> {
+pub struct Tag {
     /// Unique name
-    pub name: &'a str,
+    pub name: String,
 
     /// Description of [Tag]
-    pub desc: &'a str,
+    pub desc: String,
 
     /// [Regex] pattern to match for
     regex: Regex,
 
     /// [Field] to pattern match
-    pub from: &'a Field,
+    pub from: Field,
 
     /// [Severity] of [Tag]
-    pub severity: &'a Severity,
+    pub severity: Severity,
 }
 
-impl<'a, T> Hash for TagSet<T>
+impl<T> Hash for TagSet<T>
 where
-    T: Deref<Target = Tag<'a>>,
+    T: Deref<Target = Tag>,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.tags.iter().for_each(|t| t.hash(state));
     }
 }
 
-impl Hash for Tag<'_> {
+impl Hash for Tag {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name.hash(state);
         self.regex.as_str().hash(state);
@@ -57,9 +57,9 @@ impl Hash for Tag<'_> {
     }
 }
 
-impl<'a, T> Deref for TagSet<T>
+impl<T> Deref for TagSet<T>
 where
-    T: Deref<Target = Tag<'a>>,
+    T: Deref<Target = Tag>,
 {
     type Target = Vec<T>;
     fn deref(&self) -> &Self::Target {
@@ -67,30 +67,30 @@ where
     }
 }
 
-impl<'a> TagSet<Tag<'a>> {
+impl TagSet<Tag> {
     /// Load an array of [ConfigTag] into a [TagSet]
-    pub fn from_config(config_tags: &'a [ConfigTag]) -> Result<Self, regex::Error> {
+    pub fn from_config(config_tags: Vec<ConfigTag>) -> Result<Self, regex::Error> {
+        let match_set = RegexSet::new(config_tags.iter().map(|i| &i.pattern))?;
         let tags = config_tags
-            .iter()
+            .into_iter()
             .map(|i| {
                 Ok(Tag {
-                    name: &i.name,
-                    desc: &i.desc,
+                    name: i.name,
+                    desc: i.desc,
                     regex: Regex::new(&i.pattern)?,
-                    from: &i.from,
-                    severity: &i.severity,
+                    from: i.from,
+                    severity: i.severity,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let match_set = RegexSet::new(config_tags.iter().map(|i| &i.pattern))?;
 
         Ok(Self { tags, match_set })
     }
 }
 
-impl<'a, T> TagSet<T>
+impl<T> TagSet<T>
 where
-    T: Deref<Target = Tag<'a>>,
+    T: Deref<Target = Tag>,
 {
     /// Grep `field` for [Tag]s
     pub fn grep_tags(&self, field: &str, from: Field) -> impl Iterator<Item = &T> {
@@ -99,7 +99,7 @@ where
             .matches(field)
             .into_iter()
             .map(|i| &self.tags[i])
-            .filter(move |t| *t.from == from)
+            .filter(move |t| t.from == from)
     }
 
     /// Get the [TagSet] schema/hash
@@ -127,9 +127,9 @@ impl<T> TagSet<T> {
     }
 }
 
-impl<'a> InDatabase<Tag<'a>> {
+impl InDatabase<Tag> {
     /// Grep `field` for [Issue]s
-    pub fn grep_issue(&'a self, field: &ArcStr) -> impl Iterator<Item = Issue> {
+    pub fn grep_issue(&self, field: &ArcStr) -> impl Iterator<Item = Issue> {
         let mut hm: HashMap<Issue, u64> = HashMap::new();
         self.regex
             .find_iter(field)
