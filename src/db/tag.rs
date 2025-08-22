@@ -20,13 +20,13 @@ pub struct TagInfo {
     pub severity: Severity,
 }
 
-impl From<&Tag<'_>> for TagInfo {
-    fn from(value: &Tag<'_>) -> Self {
+impl From<&Tag> for TagInfo {
+    fn from(value: &Tag) -> Self {
         TagInfo {
-            name: value.name.to_string(),
-            desc: value.desc.to_string(),
-            field: *value.from,
-            severity: *value.severity,
+            name: value.name.clone(),
+            desc: value.desc.clone(),
+            field: value.from,
+            severity: value.severity,
         }
     }
 }
@@ -112,11 +112,11 @@ impl TagInfo {
     }
 
     /// Upsert a [TagSet] into [super::Database]
-    pub fn upsert_tag_set<'a>(
+    pub fn upsert_tag_set(
         db: &super::Database,
-        tags: TagSet<Tag<'a>>,
+        tags: TagSet<Tag>,
         params: (),
-    ) -> rusqlite::Result<TagSet<super::InDatabase<Tag<'a>>>> {
+    ) -> rusqlite::Result<TagSet<super::InDatabase<Tag>>> {
         tags.try_swap_tags(|t| {
             Ok(super::InDatabase::new(
                 TagInfo::from(&t).upsert(db, params)?.id,
