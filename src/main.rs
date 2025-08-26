@@ -117,7 +117,7 @@ async fn pull_build_logs(
         })?;
     }
 
-    runs.reserve_exact(handles.len());
+    runs.reserve(handles.len());
 
     // collect them all here
     while let Some(h) = handles.join_next().await {
@@ -148,12 +148,9 @@ async fn parse_unprocessed_runs(
                             t.name, run.display_name
                         ),
                     };
-                    let run_name =
-                        tags.grep_tags(&run.display_name, Field::RunName)
-                            .flat_map(|t| {
-                                warn(t);
-                                t.grep_issue(&run.display_name)
-                            });
+                    let run_name = tags
+                        .grep_tags(&run.display_name, Field::RunName)
+                        .flat_map(|t| t.grep_issue(&run.display_name));
                     let console = run.log.iter().flat_map(|l| {
                         tags.grep_tags(l, Field::Console).flat_map(|t| {
                             warn(t);
@@ -232,7 +229,7 @@ async fn calculate_similarities(
             }
         }
         if handles.is_empty() {
-            groups.push(vec![issue.clone()])
+            groups.push(vec![issue.clone()]);
         }
     }
 
