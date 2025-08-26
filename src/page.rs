@@ -4,7 +4,6 @@ use std::time::SystemTime;
 use anyhow::{Error, Result};
 use jenkins_api::build::BuildStatus;
 use maud::{DOCTYPE, Markup, html};
-use rayon::slice::ParallelSliceMut;
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
@@ -36,7 +35,7 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
     let sorted_runs = match &last_build {
         Some(b) => {
             let mut sr = Run::select_all_by_build(db, b, ())?;
-            sr.par_sort_by_key(|r| match r.status {
+            sr.sort_by_key(|r| match r.status {
                 Some(BuildStatus::Failure) => 0,
                 Some(BuildStatus::Unstable) => 1,
                 Some(BuildStatus::Success) => 2,
