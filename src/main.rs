@@ -199,62 +199,40 @@ async fn calculate_similarities(
 ) -> Result<()> {
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<Arc<InDatabase<Issue>>>> = Vec::new();
-    for i in issues.into_iter().map(Arc::new) {
-        let mut handles = JoinSet::new();
-
-        let capacity = groups.len();
-        groups.into_iter().for_each(|g| {
-            let i = i.clone();
-            handles.spawn(async move {
-                let mut inner = JoinSet::new();
-                let capacity = g.len();
-                g.into_iter().for_each(|i2| {
-                    let i = i.clone();
-                    inner.spawn_blocking(move || {
-                        match normalized_levenshtein_distance(&i.snippet, &i2.snippet) > threshold {
-                            true => Ok(i2),
-                            false => Err(i2),
-                        }
+    for issue in issues.into_iter().map(Arc::new) {
+        let mut handles: JoinSet<_> = groups
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, g)| {
+                let issue = issue.clone();
+                async move {
+                    let mut inner = JoinSet::new();
+                    g.into_iter().for_each(|issue2| {
+                        let issue = issue.clone();
+                        inner.spawn_blocking(move || {
+                            normalized_levenshtein_distance(&issue.snippet, &issue2.snippet)
+                                > threshold
+                        });
                     });
-                });
 
-                #[allow(clippy::manual_try_fold)] // we don't want a short-circuit
-                inner.join_all().await.into_iter().fold(
-                    Ok(Vec::with_capacity(capacity)),
-                    |acc, h| {
-                        let mut acc = match acc {
-                            Ok(acc) | Err(acc) => acc,
-                        };
-                        match h {
-                            Ok(i) => {
-                                acc.push(i);
-                                Ok(acc)
-                            }
-                            Err(i) => {
-                                acc.push(i);
-                                Err(acc)
-                            }
-                        }
-                    },
-                )
-            });
-        });
+                    while matches!(inner.join_next().await, Some(Ok(true))) {}
+                    match inner.is_empty() {
+                        true => Some(i),
+                        false => None,
+                    }
+                }
+            })
+            .collect();
 
-        groups = Vec::with_capacity(capacity);
         while let Some(h) = handles.join_next().await {
-            match h? {
-                Ok(mut g) => {
-                    g.push(i.clone());
-                    groups.push(g);
-                    break;
-                }
-                Err(g) => {
-                    groups.push(g);
-                }
+            if let Some(i) = h? {
+                groups[i].push(issue.clone());
+                break;
             }
         }
-        if groups.is_empty() {
-            groups.push(vec![i.clone()])
+        if handles.is_empty() {
+            groups.push(vec![issue.clone()])
         }
     }
 
