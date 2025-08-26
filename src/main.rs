@@ -311,13 +311,13 @@ async fn main() -> Result<()> {
         jenkins_url,
         password,
         project,
-        tag: tags,
+        tag,
         threshold,
         timezone,
         username,
         view,
     } = toml::from_str(&fs::read_to_string(args.config)?)?;
-    let tags = TagSet::from_config(tags)?;
+    let tags = TagSet::from_config(tag)?;
 
     // open db
     info!("Opening database...");
