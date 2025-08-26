@@ -10,7 +10,6 @@ use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
 use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
 use log::{Level, info, log, warn};
-use rayon::prelude::*;
 use time::UtcOffset;
 use tokio::task::JoinSet;
 
@@ -182,57 +181,109 @@ async fn parse_unprocessed_runs(
 }
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
-async fn calculate_similarities(
-    issues: Vec<InDatabase<Issue>>,
-    threshold: f32,
-    db: &Database,
-) -> Result<()> {
+async fn calculate_similarities(threshold: f32, db: &Database) -> Result<()> {
+    let runs = Run::select_all(db, ())?;
+    let issues = runs.iter().flat_map(|r| {
+        Issue::select_all_not_metadata(db, (db, r))
+            .into_iter()
+            .flatten()
+    });
+
     // conservatively group by levenshtein distance
-    let mut groups: Vec<Vec<InDatabase<Issue>>> = Vec::new();
-    issues
-        .into_iter()
-        .filter_map(
-            |i| match TagInfo::select_one(db, i.tag_id, ()).map(|t| t.severity) {
-                Ok(Severity::Metadata) | Err(_) => None,
-                Ok(_) => Some(i),
-            },
-        )
-        .for_each(|i| {
-            match groups.par_iter_mut().find_any(|g| {
-                g.par_iter()
-                    .all(|i2| normalized_levenshtein_distance(&i.snippet, &i2.snippet) > threshold)
-            }) {
-                Some(g) => g.push(i),
-                None => groups.push(vec![i]),
-            }
+    let mut groups: Vec<Vec<Arc<InDatabase<Issue>>>> = Vec::new();
+    for i in issues.into_iter().map(|i| Arc::new(i)) {
+        let mut handles = JoinSet::new();
+
+        let capacity = groups.len();
+        groups.into_iter().for_each(|g| {
+            let i = i.clone();
+            handles.spawn(async move {
+                let mut inner = JoinSet::new();
+                let capacity = g.len();
+                g.into_iter().for_each(|i2| {
+                    let i = i.clone();
+                    inner.spawn_blocking(move || {
+                        match normalized_levenshtein_distance(&i.snippet, &i2.snippet) > threshold {
+                            true => Ok(i2),
+                            false => Err(i2),
+                        }
+                    });
+                });
+
+                inner.join_all().await.into_iter().fold(
+                    Ok(Vec::with_capacity(capacity)),
+                    |acc, h| {
+                        let mut acc = match acc {
+                            Ok(acc) | Err(acc) => acc,
+                        };
+                        match h {
+                            Ok(i) => {
+                                acc.push(i);
+                                Ok(acc)
+                            }
+                            Err(i) => {
+                                acc.push(i);
+                                Err(acc)
+                            }
+                        }
+                    },
+                )
+            });
         });
 
-    // sort resultant groups
-    groups.par_iter_mut().for_each(|g| g.par_sort());
+        groups = Vec::with_capacity(capacity);
+        while let Some(h) = handles.join_next().await {
+            match h? {
+                Ok(mut g) => {
+                    g.push(i.clone());
+                    groups.push(g);
+                    break;
+                }
+                Err(g) => {
+                    groups.push(g);
+                }
+            }
+        }
+        if groups.is_empty() {
+            groups.push(vec![i.clone()])
+        }
+    }
 
-    // store relations in database
-    groups
-        .par_iter()
-        .filter(|g| g.len() > 1) // unique issues are discarded
-        .flat_map(|g| {
+    // sort resultant groups
+    let mut handles = JoinSet::new();
+    for mut g in groups {
+        handles.spawn_blocking(|| {
+            g.sort();
+
             let mut hasher = DefaultHasher::new();
             g.hash(&mut hasher);
-            g.par_iter().map(move |i| (hasher.finish(), i))
-        })
-        .try_for_each(|(hash, i)| {
-            SimilarityInfo {
-                similarity_hash: hash,
-                issue_id: i.id,
-            }
-            .insert(&db.lock().unwrap(), ())?;
+            (hasher.finish(), g)
+        });
+    }
 
-            info!(
-                "Issue '#{}' likely matches with similarity group '#{}'!",
-                i.id, hash
-            );
+    // store relations in database
+    while let Some(h) = handles.join_next().await {
+        let (hash, g) = h?;
+        // unique issues are discarded
+        if g.len() > 1 {
+            g.iter().try_for_each(|i| {
+                SimilarityInfo {
+                    similarity_hash: hash,
+                    issue_id: i.id,
+                }
+                .insert(db, ())?;
 
-            Ok(())
-        })
+                info!(
+                    "Issue '#{}' likely matches with similarity group '#{}'!",
+                    i.id, hash
+                );
+
+                Ok::<_, Error>(())
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -323,7 +374,7 @@ async fn main() -> Result<()> {
         TagInfo::delete_all_orphan(&database)?;
 
         info!("Calculating issue similarities...");
-        calculate_similarities(&database, threshold)?;
+        calculate_similarities(threshold, &database).await?;
     } else {
         info!("No runs to process.");
     }
