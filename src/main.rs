@@ -131,6 +131,7 @@ async fn parse_unprocessed_runs(
     db: &Database,
 ) -> Result<Vec<InDatabase<Issue>>> {
     let mut handles = JoinSet::new();
+    let mut inserted_issues = Vec::new();
 
     runs.into_iter().for_each(|run| match run.tag_schema {
         None => {
@@ -163,14 +164,21 @@ async fn parse_unprocessed_runs(
                 (run, issues)
             });
         }
-        _ => {}
+        _ => inserted_issues.extend(
+            Issue::select_all_not_metadata(db, (db, &run))
+                .into_iter()
+                .flatten(),
+        ),
     });
 
-    let mut inserted_issues = Vec::new();
     while let Some(h) = handles.join_next().await {
         let (run, issues) = h?;
         inserted_issues = issues.into_iter().try_fold(inserted_issues, |mut acc, i| {
-            acc.push(i.insert(db, (&run,))?);
+            let issue = i.insert(db, (&run,))?;
+            match TagInfo::select_one(db, issue.tag_id, ())?.severity {
+                Severity::Metadata => {}
+                _ => acc.push(issue),
+            }
             Ok::<_, Error>(acc)
         })?;
     }
@@ -181,14 +189,11 @@ async fn parse_unprocessed_runs(
 }
 
 /// Calculate similarities against all issues and soft insert the groupings into [Database]
-async fn calculate_similarities(threshold: f32, db: &Database) -> Result<()> {
-    let runs = Run::select_all(db, ())?;
-    let issues = runs.iter().flat_map(|r| {
-        Issue::select_all_not_metadata(db, (db, r))
-            .into_iter()
-            .flatten()
-    });
-
+async fn calculate_similarities(
+    issues: Vec<InDatabase<Issue>>,
+    threshold: f32,
+    db: &Database,
+) -> Result<()> {
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<Arc<InDatabase<Issue>>>> = Vec::new();
     for i in issues.into_iter().map(|i| Arc::new(i)) {
@@ -360,7 +365,7 @@ async fn main() -> Result<()> {
 
     if Run::has_untagged(&database)? {
         info!("Parsing unprocessed run logs...");
-        parse_unprocessed_runs(runs, tags.into(), &database).await?;
+        let issues = parse_unprocessed_runs(runs, tags.into(), &database).await?;
 
         info!("Done!");
         info!("----------------------------------------");
@@ -374,7 +379,7 @@ async fn main() -> Result<()> {
         TagInfo::delete_all_orphan(&database)?;
 
         info!("Calculating issue similarities...");
-        calculate_similarities(threshold, &database).await?;
+        calculate_similarities(issues, threshold, &database).await?;
     } else {
         info!("No runs to process.");
     }
