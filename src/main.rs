@@ -1,6 +1,5 @@
 //! A Jenkins CI/CD-based build analyzer and issue prioritizer.
 use std::{
-    fs,
     hash::{DefaultHasher, Hash, Hasher},
     sync::Arc,
 };
@@ -11,7 +10,10 @@ use env_logger::Env;
 use jenkins_api::{Jenkins, JenkinsBuilder, build::BuildStatus};
 use log::{Level, info, log, warn};
 use time::UtcOffset;
-use tokio::task::JoinSet;
+use tokio::{
+    fs,
+    task::{self, JoinSet},
+};
 
 use crate::{
     api::{AsBuild, AsJob, AsRun, SparseBuild, SparseMatrixProject},
@@ -291,7 +293,7 @@ async fn main() -> Result<()> {
         timezone,
         username,
         view,
-    } = toml::from_str(&fs::read_to_string(args.config)?)?;
+    } = toml::from_str(&fs::read_to_string(args.config).await?)?;
     let tags = TagSet::from_config(tag)?;
 
     // open db
@@ -369,11 +371,19 @@ async fn main() -> Result<()> {
     if let Some(output) = args.output {
         info!("Generating report...");
 
-        let markup =
-            page::render(&database, &view, UtcOffset::from_hms(timezone, 0, 0)?)?.into_string();
+        let markup = task::spawn_blocking(move || {
+            page::render(
+                &database,
+                &view,
+                UtcOffset::from_hms(timezone, 0, 0).unwrap(),
+            )
+            .unwrap()
+            .into_string()
+        })
+        .await?;
 
         if let Some(filepath) = output {
-            fs::write(&filepath, markup)?;
+            fs::write(&filepath, markup).await?;
 
             info!("Written to {filepath}");
         } else {
