@@ -61,12 +61,12 @@ async fn pull_build_logs(
     // spawn tasks to pull builds
     for sj in project.jobs {
         let job: Arc<_> = match blocklist.contains(&sj.name) {
-            false => sj.as_job().upsert(&db, ())?.into(),
+            false => sj.as_job().upsert(db, ())?.into(),
             true => continue,
         };
         let (build, mut mbs): (Arc<_>, _) = match sj.last_build {
             Some(build @ SparseBuild { runs: Some(_), .. }) => (
-                build.as_build(job.id).upsert(&db, ())?.into(),
+                build.as_build(job.id).upsert(db, ())?.into(),
                 build
                     .runs
                     .into_iter()
@@ -79,8 +79,11 @@ async fn pull_build_logs(
             }
         };
 
-        mbs.try_for_each(|mb| match Run::select_one_by_url(&db, &mb.url, ()) {
-            Ok(run) => Ok(runs.push(run)), // cached
+        mbs.try_for_each(|mb| match Run::select_one_by_url(db, &mb.url, ()) {
+            Ok(run) => {
+                runs.push(run);
+                Ok(())
+            } // cached
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 let jenkins = jenkins.clone();
                 let job = job.clone();
@@ -110,7 +113,7 @@ async fn pull_build_logs(
 
                 Ok(())
             }
-            Err(e) => return Err(Error::from(e)),
+            Err(e) => Err(Error::from(e)),
         })?;
     }
 
@@ -184,7 +187,7 @@ async fn parse_unprocessed_runs(
     }
 
     // batch update tag schema for runs afterwards
-    Run::update_all_tag_schema(&db, Some(tags.schema()))?;
+    Run::update_all_tag_schema(db, Some(tags.schema()))?;
     Ok(inserted_issues)
 }
 
@@ -196,7 +199,7 @@ async fn calculate_similarities(
 ) -> Result<()> {
     // conservatively group by levenshtein distance
     let mut groups: Vec<Vec<Arc<InDatabase<Issue>>>> = Vec::new();
-    for i in issues.into_iter().map(|i| Arc::new(i)) {
+    for i in issues.into_iter().map(Arc::new) {
         let mut handles = JoinSet::new();
 
         let capacity = groups.len();
@@ -215,6 +218,7 @@ async fn calculate_similarities(
                     });
                 });
 
+                #[allow(clippy::manual_try_fold)] // we don't want a short-circuit
                 inner.join_all().await.into_iter().fold(
                     Ok(Vec::with_capacity(capacity)),
                     |acc, h| {
