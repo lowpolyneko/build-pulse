@@ -215,23 +215,31 @@ async fn calculate_similarities(
                         });
                     });
 
-                    while matches!(inner.join_next().await, Some(Ok(true))) {}
-                    match inner.is_empty() {
-                        true => Some(i),
-                        false => None,
+                    loop {
+                        match inner.join_next().await {
+                            Some(Ok(true)) => continue,
+                            Some(Ok(false)) => return None,
+                            None => return Some(i),
+                            Some(Err(e)) => std::panic::resume_unwind(e.into_panic()),
+                        }
                     }
                 }
             })
             .collect();
 
-        while let Some(h) = handles.join_next().await {
-            if let Some(i) = h? {
-                groups[i].push(issue.clone());
-                break;
+        loop {
+            match handles.join_next().await {
+                Some(Ok(None)) => continue,
+                Some(Ok(Some(i))) => {
+                    groups[i].push(issue.clone());
+                    break;
+                }
+                None => {
+                    groups.push(vec![issue.clone()]);
+                    break;
+                }
+                Some(Err(e)) => std::panic::resume_unwind(e.into_panic()),
             }
-        }
-        if handles.is_empty() {
-            groups.push(vec![issue.clone()]);
         }
     }
 
