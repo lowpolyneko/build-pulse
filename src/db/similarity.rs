@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     db::{InDatabase, Issue, Queryable, Run, TagInfo},
@@ -13,7 +13,7 @@ pub struct SimilarityInfo {
 /// List of similar [Run]s by [TagInfo] in [super::Database]
 pub struct Similarity {
     pub tag: InDatabase<TagInfo>,
-    pub related: Vec<i64>,
+    pub related: HashSet<i64>,
     pub example: String,
 }
 
@@ -73,7 +73,7 @@ impl Similarity {
                 .or_insert({
                     Self {
                         tag,
-                        related: Vec::new(),
+                        related: HashSet::new(),
                         example: Issue::select_one(
                             db,
                             issue_id,
@@ -84,7 +84,7 @@ impl Similarity {
                     }
                 })
                 .related
-                .push(run_id);
+                .insert(run_id);
 
             Ok::<_, rusqlite::Error>(())
         })?;
