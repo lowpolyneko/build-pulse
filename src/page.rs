@@ -198,7 +198,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Failures"
                 }
                 td style="border: 1px solid black;" {
-                    (render_run_ids(&stats.failures, db)?)
+                    (render_run_ids(stats.failures.iter(), db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -206,7 +206,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Unstable"
                 }
                 td style="border: 1px solid black;" {
-                    (render_run_ids(&stats.unstable, db)?)
+                    (render_run_ids(stats.unstable.iter(), db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -214,7 +214,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Healthy"
                 }
                 td style="border: 1px solid black;" {
-                    (render_run_ids(&stats.successful, db)?)
+                    (render_run_ids(stats.successful.iter(), db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -222,7 +222,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Aborted"
                 }
                 td style="border: 1px solid black;" {
-                    (render_run_ids(&stats.aborted, db)?)
+                    (render_run_ids(stats.aborted.iter(), db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -230,7 +230,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                     "Not Built"
                 }
                 td style="border: 1px solid black;" {
-                    (render_run_ids(&stats.not_built, db)?)
+                    (render_run_ids(stats.not_built.iter(), db)?)
                 }
             }
             tr style="border: 1px solid black;" {
@@ -274,7 +274,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
                 }
                 td style="border: 1px solid black;" {
                     b {
-                        (render_run_ids(&stats.unknown_runs, db)?)
+                        (render_run_ids(stats.unknown_runs.iter(), db)?)
                     }
                 }
             }
@@ -306,7 +306,7 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                         }
                     }
                     td style="border: 1px solid black;" {
-                        (render_run_ids(&s.related, db)?)
+                        (render_run_ids(s.related.iter(), db)?)
                     }
                 }
             }
@@ -339,7 +339,7 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
                             }
                         }
                         td style="border: 1px solid black;" {
-                            (render_run_ids(&matches, db)?)
+                            (render_run_ids(matches.iter(), db)?)
                         }
                     }
                 }
@@ -348,12 +348,16 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
     })
 }
 
-fn render_run_ids(ids: &[i64], db: &Database) -> Result<Markup> {
+fn render_run_ids<'a, T>(ids: T, db: &Database) -> Result<Markup>
+where
+    T: ExactSizeIterator + Iterator<Item = &'a i64>,
+{
     Ok(html! {
-        @if !ids.is_empty() {
+        @let len = ids.len();
+        @if len > 0 {
             details {
                 summary {
-                    (ids.len())
+                    (len)
                     " runs"
                 }
                 ul {
