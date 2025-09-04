@@ -21,9 +21,17 @@
           packages = [
             openssl
             pkg-config
+            python3
             rustup
             sqlite
+            uv
           ];
+
+          env = {
+            LD_LIBRARY_PATH = lib.makeLibraryPath [ stdenv.cc.cc.lib ];
+            UV_PYTHON = python3.interpreter;
+            UV_PYTHON_PREFERENCE = "only-system";
+          };
         };
       }
     );
