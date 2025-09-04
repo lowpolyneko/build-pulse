@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 
 use rusqlite::{Connection, Params, Result, Row};
 
+mod artifact;
 mod build;
 mod issue;
 mod job;
@@ -12,7 +13,7 @@ mod similarity;
 mod stats;
 mod tag;
 
-pub use {build::*, issue::*, job::*, run::*, similarity::*, stats::*, tag::*};
+pub use {artifact::*, build::*, issue::*, job::*, run::*, similarity::*, stats::*, tag::*};
 
 /// Read [serde] serialized value from `row` and `idx`
 #[macro_export]
