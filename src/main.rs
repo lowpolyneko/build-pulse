@@ -1,6 +1,7 @@
 //! A Jenkins CI/CD-based build analyzer and issue prioritizer.
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
+    process::Stdio,
     sync::Arc,
 };
 
@@ -15,12 +16,14 @@ use log::{Level, info, log, warn};
 use time::UtcOffset;
 use tokio::{
     fs,
+    io::AsyncWriteExt,
+    process::Command,
     task::{self, JoinSet},
 };
 
 use crate::{
     api::{AsBuild, AsJob, AsRun, SparseBuild, SparseMatrixProject},
-    config::{Config, Field, Severity},
+    config::{Config, ConfigArtifact, Field, Severity},
     db::{
         Artifact, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, SimilarityInfo,
         TagInfo, Upsertable,
@@ -56,7 +59,7 @@ struct Args {
 /// Pull builds from `project.jobs` and cache them into database `db`
 async fn pull_build_logs(
     project: SparseMatrixProject,
-    artifacts: Arc<[String]>,
+    artifacts: Arc<[ConfigArtifact]>,
     blocklist: &[String],
     jenkins: Arc<Jenkins>,
     db: &Database,
@@ -101,9 +104,27 @@ async fn pull_build_logs(
 
                     let mut blobs = Vec::new();
                     for a in &full_build.artifacts {
-                        if artifacts.contains(&a.relative_path)
+                        if let Some(c) = artifacts.iter().find(|c| c.path == a.relative_path)
                             && let Ok(blob) = full_build.get_artifact(&jenkins, a).await
                         {
+                            let blob = if let Some(mut iter) =
+                                c.post_process.as_ref().map(|argv| argv.iter())
+                                && let Some(program) = iter.next()
+                            {
+                                // pipe artifact to subprocess
+                                let mut child = Command::new(program)
+                                    .args(iter)
+                                    .stdin(Stdio::piped())
+                                    .stdout(Stdio::piped())
+                                    .spawn()
+                                    .unwrap();
+
+                                child.stdin.take().unwrap().write_all(&blob).await.unwrap();
+                                child.wait_with_output().await.unwrap().stdout
+                            } else {
+                                blob.to_vec()
+                            };
+
                             blobs.push((a.relative_path.clone(), blob));
                         }
                     }
@@ -138,7 +159,7 @@ async fn pull_build_logs(
         blobs.into_iter().try_for_each(|(p, b)| {
             Artifact {
                 path: p,
-                contents: b.into(),
+                contents: b,
                 run_id: run.id,
             }
             .insert(db, ())?;
@@ -373,11 +394,7 @@ async fn main() -> Result<()> {
     let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
     let runs = pull_build_logs(
         project,
-        artifact
-            .into_iter()
-            .map(|a| a.path)
-            .collect::<Vec<_>>()
-            .into(),
+        artifact.into(),
         &blocklist,
         jenkins.into(),
         &database,

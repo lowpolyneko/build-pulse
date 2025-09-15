@@ -2,6 +2,7 @@
 use std::time::SystemTime;
 
 use anyhow::{Error, Result};
+use base64::{display::Base64Display, engine::general_purpose::STANDARD};
 use jenkins_api::build::BuildStatus;
 use maud::{DOCTYPE, Markup, html};
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
@@ -165,7 +166,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         hr;
                     }
                 }
-                a href=(format!("{}/consoleFull", run.url)) {
+                a href={(run.url) "/consoleFull"} {
                     "Full Build Log"
                 }
             }
@@ -177,15 +178,31 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                         }
                         hr;
                         @for a in artifacts.into_iter().map(|a| a.item()) {
-                            @if let Ok(blob) = String::from_utf8(a.contents) {
-                                b {
-                                    (a.path)
-                                }
-                                pre {
-                                    (blob)
-                                }
-                                hr;
+                            b {
+                                (a.path)
                             }
+                            br;
+                            @match a.contents.as_slice() {
+                                [] => i {
+                                    "no data"
+                                },
+                                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] =>
+                                    // PNG magic
+                                    img src={
+                                        "data:image/png;base64,"
+                                        (Base64Display::new(&a.contents, &STANDARD))
+                                    };,
+                                _ => @if let Ok(blob) = String::from_utf8(a.contents) {
+                                    pre {
+                                        (blob)
+                                    }
+                                } @else {
+                                    p {
+                                        "can't display"
+                                    }
+                                },
+                            }
+                            hr;
                         }
                     }
                 }
