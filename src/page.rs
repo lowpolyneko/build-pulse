@@ -192,12 +192,19 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                                         "data:image/png;base64,"
                                         (Base64Display::new(&a.contents, &STANDARD))
                                     };,
-                                _ => @if let Ok(blob) = String::from_utf8(a.contents) {
-                                    pre {
-                                        (blob)
-                                    }
-                                } @else {
-                                    p {
+                                _ => @match String::from_utf8(a.contents) {
+                                    Ok(blob) => @if blob.contains("<svg") {
+                                        // SVG XML data
+                                        img src={
+                                            "data:image/svg+xml;base64,"
+                                            (Base64Display::new(blob.as_bytes(), &STANDARD))
+                                        };
+                                    } @else {
+                                        pre {
+                                            (blob)
+                                        }
+                                    },
+                                    Err(_) => p {
                                         "can't display"
                                     }
                                 },
