@@ -196,6 +196,10 @@ impl<T> InDatabase<T> {
     fn new(id: i64, item: T) -> Self {
         InDatabase { id, item }
     }
+
+    pub fn item(self) -> T {
+        self.item
+    }
 }
 
 // Hash only considers the id property for [InDatabase]
