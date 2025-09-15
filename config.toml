@@ -33,9 +33,12 @@ expr = 't"jenkins_agent_offline" && T"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|
 ### ARTIFACTS
 ### ----------------------------------------------------------------------
 [[artifact]]
-path = "top.txt"
+path = '''top.txt'''
 
 post_process = ["./scripts/top.py"]
+
+[[artifact]]
+path = '''graph_.*.svg'''
 
 ### FATAL TOOLING EMITS
 ### ----------------------------------------------------------------------
