@@ -7,16 +7,18 @@
 # ]
 # ///
 """
-Graphs all jobs by their `top.txt` resource usage.
+Graphs a job by its `top.txt` resource usage.
 """
 
 # pyright: reportAny=false
 # pyright: reportUnknownMemberType=false
 
 from datetime import datetime
-import logging
 from os import environ
+import argparse
+import logging
 import sqlite3
+from sys import stdin, stdout
 
 from matplotlib.axes import Axes
 from matplotlib.dates import DateFormatter
@@ -26,7 +28,7 @@ import matplotlib.pyplot as plt
 
 
 def plot_run(
-    tops: list[str],
+    tops: list[list[str]],
     name: str,
     cpu_ax: Axes,
     mem_ax: Axes,
@@ -52,25 +54,37 @@ def plot_run(
 
 def main() -> None:
     logging.basicConfig(level=environ.get("LOGLEVEL", "WARNING").upper())
+    parser = argparse.ArgumentParser()
+    _ = parser.add_argument("-u", "--url")
+    _ = parser.add_argument(
+        "-d", "--db", nargs="?", const=1, type=str, default="data.db"
+    )
+    _ = parser.add_argument("-o", "--output")
+    args = parser.parse_args()
+
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True)
 
-    with sqlite3.connect("data.db") as con:
-        cur = con.cursor()
-        res = cur.execute(
-            " \
-            SELECT display_name,contents FROM artifacts \
-            JOIN runs ON artifacts.run_id = runs.id \
-            WHERE path = 'top.txt' \
-            "
-        )
+    if args.url is not None:
+        with sqlite3.connect(args.db) as con:
+            cur = con.cursor()
+            res = cur.execute(
+                " \
+                SELECT display_name,contents FROM artifacts \
+                JOIN runs ON artifacts.run_id = runs.id \
+                WHERE path = 'top.txt' AND url = ? \
+                ",
+                [args.url],
+            )
 
-        for display_name, contents in res.fetchall():
+            display_name, contents = res.fetchone()
             tops = [line.split() for line in contents.decode("utf-8").split("\n")]
             if all(
                 match not in display_name for match in ["bsd", "aarch64", "xpmem"]
             ):  # BSD and AArch64 top output differs
                 plot_run(tops, display_name, ax1, ax2)
-                break  # TODO output is not meaningful when considering the entire set of agents
+    else:
+        tops = [line.split() for line in stdin.read().split("\n")]
+        plot_run(tops, "", ax1, ax2)
 
     ax2.set_xlabel("Timestamp")
     ax2.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
@@ -85,7 +99,10 @@ def main() -> None:
     _ = fig.suptitle("Jenkins Agent System Usage (~1 min intervals)")
     _ = fig.legend(loc="lower right")
     fig.set_size_inches(fig.get_figwidth(), fig.get_figheight() * 2)
-    fig.savefig("usage.png")
+    if args.output:
+        fig.savefig(args.output)
+    else:
+        fig.savefig(stdout.buffer)
 
 
 if __name__ == "__main__":
