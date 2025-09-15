@@ -172,16 +172,14 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
             }
             td style="border: 1px solid black;" { // artifacts
                 @if let Ok(artifacts) = Artifact::select_all_by_run(db, run.id, ()) && !artifacts.is_empty() {
-                    details {
-                        summary {
-                            "Artifacts"
-                        }
-                        hr;
-                        @for a in artifacts.into_iter().map(|a| a.item()) {
-                            b {
-                                (a.path)
+                    @for a in artifacts.into_iter().map(|a| a.item()) {
+                        details {
+                            summary {
+                                b {
+                                    (a.path)
+                                }
                             }
-                            br;
+                            hr;
                             @match a.contents.as_slice() {
                                 [] => i {
                                     "no data"
