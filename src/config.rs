@@ -45,6 +45,9 @@ pub struct Config {
 pub struct ConfigArtifact {
     /// Path to the artifact
     pub path: String,
+
+    /// Executable to pipe artifact data into for processing
+    pub post_process: Option<Vec<String>>,
 }
 
 /// Represesnts one [crate::parse::Tag] view to be rendered
