@@ -7,7 +7,8 @@ pipeline {
         PMRS_OPT = '/nfs/gce/projects/pmrs/opt'
         RUSTUP_HOME = "${PMRS_OPT}/rustup"
         CARGO_HOME = "${PMRS_OPT}/cargo"
-        PATH = "${CARGO_HOME}/bin:${env.PATH}"
+        UV_HOME = "${PMRS_OPT}/uv-0.8.17"
+        PATH = "${CARGO_HOME}/bin:${UV_HOME}:${env.PATH}"
     }
     stages {
         stage('prepare') {
