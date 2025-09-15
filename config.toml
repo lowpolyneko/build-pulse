@@ -106,16 +106,16 @@ severity = "Warning"
 # from = "Console"
 # severity = "Info"
 
-[[tag]]
-name = "configure_error"
-desc = "./configure failure"
-
-# Matches messages of the following
-# configure: error: <message>\n
-# See `<log file>' for more details
-pattern = '''(?m)^configure: error: .*$'''
-from = "Console"
-severity = "Error"
+# [[tag]]
+# name = "configure_error"
+# desc = "./configure failure"
+#
+# # Matches messages of the following
+# # configure: error: <message>\n
+# # See `<log file>' for more details
+# pattern = '''(?m)^configure: error: .*$'''
+# from = "Console"
+# severity = "Error"
 
 [[tag]]
 name = "jenkins_agent_offline"
@@ -157,7 +157,7 @@ desc = "Java Exception Stack Trace"
 # 	at hudson.remoting.Request.abort(Request.java:346)
 # 	at hudson.remoting.Channel.terminate(Channel.java:1122)
 # 	at hudson.remoting.SynchronousCommandTransport$ReaderThread.run(SynchronousCommandTransport.java:90)
-pattern = '''(?m)^([a-zA-Z]+: .*\n([a-z]+\.)+[a-zA-Z]+(\n\s+.*)*)+$'''
+pattern = '''(?m)^([a-zA-Z]+: .*\n([a-z]+\.)+[a-zA-Z]+(: .*)?(\n\s+at .*)+)+$'''
 from = "Console"
 severity = "Info"
 
