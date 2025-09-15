@@ -13,6 +13,7 @@ use jenkins_api::{
     build::{Build, BuildStatus},
 };
 use log::{Level, info, log, warn};
+use regex::Regex;
 use time::UtcOffset;
 use tokio::{
     fs,
@@ -59,7 +60,7 @@ struct Args {
 /// Pull builds from `project.jobs` and cache them into database `db`
 async fn pull_build_logs(
     project: SparseMatrixProject,
-    artifacts: Arc<[ConfigArtifact]>,
+    artifacts: Arc<[(Regex, ConfigArtifact)]>,
     blocklist: &[String],
     jenkins: Arc<Jenkins>,
     db: &Database,
@@ -104,7 +105,9 @@ async fn pull_build_logs(
 
                     let mut blobs = Vec::new();
                     for a in &full_build.artifacts {
-                        if let Some(c) = artifacts.iter().find(|c| c.path == a.relative_path)
+                        if let Some((_, c)) = artifacts
+                            .iter()
+                            .find(|(re, _)| re.is_match(&a.relative_path))
                             && let Ok(blob) = full_build.get_artifact(&jenkins, a).await
                         {
                             let blob = if let Some(mut iter) =
@@ -116,6 +119,7 @@ async fn pull_build_logs(
                                     .args(iter)
                                     .stdin(Stdio::piped())
                                     .stdout(Stdio::piped())
+                                    .kill_on_drop(true)
                                     .spawn()
                                     .unwrap();
 
@@ -394,7 +398,11 @@ async fn main() -> Result<()> {
     let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
     let runs = pull_build_logs(
         project,
-        artifact.into(),
+        artifact
+            .into_iter()
+            .map(|a| Regex::new(&a.path).map(|re| (re, a)))
+            .collect::<Result<Vec<_>, _>>()?
+            .into(),
         &blocklist,
         jenkins.into(),
         &database,
