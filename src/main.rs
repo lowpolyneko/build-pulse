@@ -117,6 +117,8 @@ async fn pull_build_logs(
                                 // pipe artifact to subprocess
                                 let mut child = Command::new(program)
                                     .args(iter)
+                                    .env("BUILD_PULSE_RUN_NAME", run.display_name.as_str())
+                                    .env("BUILD_PULSE_RUN_URL", &run.url)
                                     .stdin(Stdio::piped())
                                     .stdout(Stdio::piped())
                                     .kill_on_drop(true)

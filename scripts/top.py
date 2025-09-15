@@ -77,14 +77,19 @@ def main() -> None:
             )
 
             display_name, contents = res.fetchone()
-            tops = [line.split() for line in contents.decode("utf-8").split("\n")]
-            if all(
-                match not in display_name for match in ["bsd", "aarch64", "xpmem"]
-            ):  # BSD and AArch64 top output differs
-                plot_run(tops, display_name, ax1, ax2)
+            contents = contents.decode("utf-8")
     else:
-        tops = [line.split() for line in stdin.read().split("\n")]
-        plot_run(tops, "", ax1, ax2)
+        display_name = environ.get("BUILD_PULSE_RUN_NAME", "unknown run")
+        contents = stdin.read()
+
+    if any(
+        match in display_name for match in ["bsd", "aarch64", "xpmem"]
+    ):  # BSD and AArch64 top output differs, just spit back the original for now
+        print(contents)
+        return
+
+    tops = [line.split() for line in contents.split("\n")]
+    plot_run(tops, display_name, ax1, ax2)
 
     ax2.set_xlabel("Timestamp")
     ax2.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
