@@ -43,13 +43,13 @@ def plot_run(
             f"--- {name} ---\n{'\n'.join([' '.join(line) for line in top])}\n--- {name} ---"
         )
         ts.append(datetime.strptime(top[0][2], "%H:%M:%S"))  # top - <time>
-        cpu_usage.append(float(top[2][7]))  # %Cpu(s): id
+        cpu_usage.append(100 - float(top[2][7]))  # %Cpu(s): id
         mem_usage.append(
-            float(top[3][5]) / float(top[3][3]) * 100
+            100 - float(top[3][5]) / float(top[3][3]) * 100
         )  # MiB Mem : <xx> free / <xx> total
 
-    _ = cpu_ax.plot(numpy.array(ts), cpu_usage, label=name, ls=":")
-    _ = mem_ax.plot(numpy.array(ts), mem_usage, ls=":")
+    _ = cpu_ax.plot(numpy.array(ts), cpu_usage, label=name)
+    _ = mem_ax.plot(numpy.array(ts), mem_usage)
 
 
 def main() -> None:
@@ -90,11 +90,11 @@ def main() -> None:
     ax2.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
     fig.autofmt_xdate()
 
-    ax1.set_ylabel("CPU(s) Idle%")
+    ax1.set_ylabel("CPU Usage%")
     ax1.set_ybound(0, 100)
     ax1.yaxis.set_major_formatter(PercentFormatter())
 
-    ax2.set_ylabel("Mem Free%")
+    ax2.set_ylabel("Mem Usage%")
 
     _ = fig.suptitle("Jenkins Agent System Usage (~1 min intervals)")
     _ = fig.legend(loc="lower right")
