@@ -40,6 +40,11 @@ post_process = ["./scripts/top.py"]
 [[artifact]]
 path = '''graph_.*.svg'''
 
+[[artifact]]
+path = '''summary.junit.xml'''
+
+post_process = ["./scripts/junit.py"]
+
 ### FATAL TOOLING EMITS
 ### ----------------------------------------------------------------------
 [[tag]]
