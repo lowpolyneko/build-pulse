@@ -39,3 +39,21 @@ impl Queryable for Artifact {
         Ok((&self.path, &self.contents, self.run_id))
     }
 }
+
+impl Artifact {
+    /// Get all [Artifact] from [super::Database] by [super::Run]
+    pub fn select_all_by_run(
+        db: &super::Database,
+        run_id: i64,
+        params: (),
+    ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
+        db.prepare_cached(
+            "
+                SELECT * FROM artifacts
+                WHERE run_id = ?
+                ",
+        )?
+        .query_map((run_id,), Self::map_row(params))?
+        .collect()
+    }
+}

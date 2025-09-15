@@ -9,7 +9,8 @@ use time::{OffsetDateTime, UtcOffset, macros::format_description};
 use crate::{
     config::TagView,
     db::{
-        Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, Similarity, Statistics, TagInfo,
+        Artifact, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, Similarity,
+        Statistics, TagInfo,
     },
     tag_expr::TagExpr,
 };
@@ -166,6 +167,27 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 }
                 a href=(format!("{}/consoleFull", run.url)) {
                     "Full Build Log"
+                }
+            }
+            td style="border: 1px solid black;" { // artifacts
+                @if let Ok(artifacts) = Artifact::select_all_by_run(db, run.id, ()) && !artifacts.is_empty() {
+                    details {
+                        summary {
+                            "Artifacts"
+                        }
+                        hr;
+                        @for a in artifacts.into_iter().map(|a| a.item()) {
+                            @if let Ok(blob) = String::from_utf8(a.contents) {
+                                b {
+                                    (a.path)
+                                }
+                                pre {
+                                    (blob)
+                                }
+                                hr;
+                            }
+                        }
+                    }
                 }
             }
         }
