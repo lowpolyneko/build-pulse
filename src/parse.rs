@@ -93,10 +93,10 @@ where
     T: Deref<Target = Tag>,
 {
     /// Grep `field` for [Tag]s
-    pub fn grep_tags(&self, field: &str, from: Field) -> impl Iterator<Item = &T> {
+    pub fn grep_tags(&self, field: ArcStr, from: Field) -> impl Iterator<Item = &T> {
         // matches using the match set first, then the regex of all valid matches are ran again to find them
         self.match_set
-            .matches(field)
+            .matches(&field)
             .into_iter()
             .map(|i| &self.tags[i])
             .filter(move |t| t.from == from)
@@ -129,10 +129,10 @@ impl<T> TagSet<T> {
 
 impl InDatabase<Tag> {
     /// Grep `field` for [Issue]s
-    pub fn grep_issue(&self, field: &ArcStr) -> impl Iterator<Item = Issue> {
+    pub fn grep_issue(&self, field: ArcStr) -> impl Iterator<Item = Issue> {
         let mut hm: HashMap<Issue, u64> = HashMap::new();
         self.regex
-            .find_iter(field)
+            .find_iter(&field)
             .map(|m| Issue {
                 snippet: field.substr_from(m.into()),
                 tag_id: self.id,

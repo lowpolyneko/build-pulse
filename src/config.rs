@@ -113,6 +113,7 @@ fields! {
     pub enum Field {
         Console,
         RunName,
+        Artifact,
     }
 }
 

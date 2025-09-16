@@ -99,7 +99,7 @@ desc = "No space left on device"
 # (<file><lineno>: )?<binary>: command not found
 pattern = '''(?m)^[a-zA-Z0-9_\-\./ ]+(: .*)?: No space left on device$'''
 from = "Console"
-severity = "Warning"
+severity = "Info"
 
 # [[tag]]
 # name = "no_such_file_or_dir"
@@ -128,7 +128,7 @@ desc = "Jenkins Build Agent went offline during the build"
 
 pattern = '''(?m)^Agent went offline during the build$'''
 from = "Console"
-severity = "Warning"
+severity = "Info"
 
 [[tag]]
 name = "java_stack_trace"
@@ -220,6 +220,42 @@ desc = "Failure from MPIR_Assert"
 pattern = '''(?m)^Assertion failed in file [a-zA-Z0-9_\-\./ ]+ at line [0-9]+: .*$'''
 from = "Console"
 severity = "Error"
+
+[[tag]]
+name = "tap_failure"
+desc = "TAP failure from Testsuite"
+
+# Matches messages of the following
+# not ok 2756 - ./rma/acc_pairtype_shm 2
+#   ---
+#   Directory: ./rma
+#   File: acc_pairtype_shm
+#   Num-procs: 2
+#   Timeout: 180
+#   Date: "Mon Sep 15 20:38:42 2025"
+#   ...
+# ## Test output (expected 'No Errors'):
+# ## Fatal error in internal_Barrier: Other MPI error, error stack:
+# ## internal_Barrier(94)...................: MPI_Barrier(MPI_COMM_WORLD) failed
+# ## MPIR_Barrier_impl(111).................:
+# ## MPIR_Barrier_allcomm_auto(53)..........:
+# ## MPIR_Barrier_intra_dissemination(32)...:
+# ## MPIC_Sendrecv(280).....................:
+# ## MPIC_Wait(99)..........................:
+# ## MPIR_Wait(741).........................:
+# ## MPIR_Wait_state(698)...................:
+# ## MPIDI_CH3I_Progress(360)...............:
+# ## MPID_nem_mpich_blocking_recv(948)......:
+# ## MPID_nem_tcp_connpoll(1787)............:
+# ## state_commrdy_handler(1632)............:
+# ## MPID_nem_tcp_recv_handler(1529)........:
+# ## MPID_nem_handle_pkt(607)...............:
+# ## MPIDI_CH3_PktHandler_EagerSend(618)....: failure occurred while posting a receive for message data (MPIDI_CH3_PKT_EAGER_SEND)
+# ## MPIDI_CH3U_Receive_data_unexpected(232): Out of memory (unable to allocate -2147483648 bytes)
+# https://testanything.org/tap-version-14-specification.html
+pattern = '''(?m)^not ok [0-9]+ - .*\n([\s#]{2}.*)*$'''
+from = "Artifact"
+severity = "Warning"
 
 ### PLATFORM TAGS
 ### ----------------------------------------------------------------------
