@@ -99,6 +99,7 @@ impl
                     snippet_start,
                     snippet_end,
                     run_id,
+                    artifact_id,
                     tag_id,
                     duplicates
                 FROM issues
@@ -125,6 +126,7 @@ impl Issue {
                     snippet_start,
                     snippet_end,
                     run_id,
+                    artifact_id,
                     tag_id,
                     duplicates
                 FROM issues
