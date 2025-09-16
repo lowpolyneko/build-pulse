@@ -333,26 +333,29 @@ fn render_similarities(db: &Database) -> Result<Markup> {
             "Related Issues"
         }
         table style="border: 1px solid black;" {
-            @for s in Similarity::query_all(db, ())? {
-                tr style="border: 1px solid black; background-color: lightgray" {
-                    td style="border: 1px solid black;" {
-                        code title=(s.tag.desc) {
-                            (s.tag.name)
+            @for s in Similarity::query_all(db, ())?
+                .into_iter()
+                // ignore similarities within the same run
+                .filter(|s| s.related.len() > 1) {
+                    tr style="border: 1px solid black; background-color: lightgray" {
+                        td style="border: 1px solid black;" {
+                            code title=(s.tag.desc) {
+                                (s.tag.name)
+                            }
+                        }
+                        td style="border: 1px solid black;" {
+                            b {
+                                "Example Snippet"
+                            }
+                            hr;
+                            pre {
+                                (s.example)
+                            }
+                        }
+                        td style="border: 1px solid black;" {
+                            (render_run_ids(s.related.iter(), db)?)
                         }
                     }
-                    td style="border: 1px solid black;" {
-                        b {
-                            "Example Snippet"
-                        }
-                        hr;
-                        pre {
-                            (s.example)
-                        }
-                    }
-                    td style="border: 1px solid black;" {
-                        (render_run_ids(s.related.iter(), db)?)
-                    }
-                }
             }
         }
     })
