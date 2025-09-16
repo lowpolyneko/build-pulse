@@ -1,8 +1,10 @@
+use std::str::from_utf8;
+
 use arcstr::Substr;
 
 use crate::{
     config::{Field, Severity},
-    db::{Queryable, Run, TagInfo},
+    db::{Artifact, Queryable, Run, TagInfo},
     schema, write_value,
 };
 
@@ -25,28 +27,42 @@ schema! {
         snippet_start   INTEGER NOT NULL,
         snippet_end     INTEGER NOT NULL,
         run_id          INTEGER NOT NULL REFERENCES runs(id),
+        artifact_id     INTEGER REFERENCES artifacts(id),
         tag_id          INTEGER NOT NULL REFERENCES tags(id),
         duplicates      INTEGER NOT NULL
     }
 }
 
-impl Queryable<(&super::Database, &super::InDatabase<Run>), (&super::InDatabase<Run>,)> for Issue {
+impl
+    Queryable<
+        (&super::Database, &super::InDatabase<Run>),
+        (
+            &super::InDatabase<Run>,
+            Option<&super::InDatabase<Artifact>>,
+        ),
+    > for Issue
+{
     fn map_row(
         params: (&super::Database, &super::InDatabase<Run>),
     ) -> impl FnMut(&rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         let (db, run) = params;
         |row| {
-            let tag_id = row.get(4)?;
+            let tag_id = row.get(5)?;
             Ok(super::InDatabase::new(
                 row.get(0)?,
                 Self {
                     snippet: match TagInfo::select_one(db, tag_id, ())?.field {
-                        Field::Console => run.log.as_ref().ok_or(rusqlite::Error::InvalidQuery)?,
-                        Field::RunName => &run.display_name,
+                        Field::Console => run.log.clone().ok_or(rusqlite::Error::InvalidQuery)?,
+                        Field::RunName => run.display_name.clone(),
+                        Field::Artifact => {
+                            from_utf8(&Artifact::select_one(db, row.get(4)?, ())?.contents)
+                                .map_err(|_| rusqlite::Error::InvalidQuery)?
+                                .into()
+                        }
                     }
                     .substr(row.get::<_, usize>(1)?..row.get::<_, usize>(2)?),
                     tag_id,
-                    duplicates: row.get(5).map(i64::cast_unsigned)?,
+                    duplicates: row.get(6).map(i64::cast_unsigned)?,
                 },
             ))
         }
@@ -54,14 +70,18 @@ impl Queryable<(&super::Database, &super::InDatabase<Run>), (&super::InDatabase<
 
     fn as_params(
         &self,
-        params: (&super::InDatabase<Run>,),
+        params: (
+            &super::InDatabase<Run>,
+            Option<&super::InDatabase<Artifact>>,
+        ),
     ) -> rusqlite::Result<impl rusqlite::Params> {
-        let (run,) = params;
+        let (run, artifact) = params;
         let core::ops::Range::<_> { start, end } = self.snippet.range();
         Ok((
             start,
             end,
             run.id,
+            artifact.map(|a| a.id),
             self.tag_id,
             self.duplicates.cast_signed(),
         ))
