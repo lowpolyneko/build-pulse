@@ -1,5 +1,5 @@
 //! HTML report generation using [maud] templating.
-use std::time::SystemTime;
+use std::{collections::HashMap, time::SystemTime};
 
 use anyhow::{Error, Result};
 use base64::{display::Base64Display, engine::general_purpose::STANDARD};
@@ -37,7 +37,7 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
     let sorted_runs = match &last_build {
         Some(b) => {
             let mut sr = Run::select_all_by_build(db, b, ())?;
-            sr.sort_by_key(|r| match r.status {
+            sr.sort_by_cached_key(|r| match r.status {
                 Some(BuildStatus::Failure) => 0,
                 Some(BuildStatus::Unstable) => 1,
                 Some(BuildStatus::Success) => 2,
@@ -328,34 +328,50 @@ fn render_stats(db: &Database) -> Result<Markup> {
 
 /// Render [crate::db::Similarity]
 fn render_similarities(db: &Database) -> Result<Markup> {
+    let similarities: HashMap<_, Vec<_>> = Similarity::query_all(db, ())?
+        .into_iter()
+        // ignore similarities within the same run
+        .filter(|s| s.related.len() > 1)
+        .fold(HashMap::new(), |mut acc, s| {
+            acc.entry(s.tag.severity).or_default().push(s);
+
+            acc
+        });
+
     Ok(html! {
         h4 {
-            "Related Issues"
+            "Related Issues by Severity"
         }
-        table style="border: 1px solid black;" {
-            @for s in Similarity::query_all(db, ())?
-                .into_iter()
-                // ignore similarities within the same run
-                .filter(|s| s.related.len() > 1) {
-                    tr style="border: 1px solid black; background-color: lightgray" {
-                        td style="border: 1px solid black;" {
-                            code title=(s.tag.desc) {
-                                (s.tag.name)
+        @for severity in crate::config::Severity::iter().rev() {
+            @if let Some(similarities) = similarities.get(&severity) {
+                details open[matches!(severity, crate::config::Severity::Error)] {
+                    summary {
+                        (severity)
+                    }
+                    table style="border: 1px solid black;" {
+                        @for s in similarities {
+                            tr style="border: 1px solid black; background-color: lightgray" {
+                                td style="border: 1px solid black;" {
+                                    code title=(s.tag.desc) {
+                                        (s.tag.name)
+                                    }
+                                }
+                                td style="border: 1px solid black;" {
+                                    b {
+                                        "Example Snippet"
+                                    }
+                                    hr;
+                                    pre {
+                                        (s.example)
+                                    }
+                                }
+                                td style="border: 1px solid black;" {
+                                    (render_run_ids(s.related.iter(), db)?)
+                                }
                             }
-                        }
-                        td style="border: 1px solid black;" {
-                            b {
-                                "Example Snippet"
-                            }
-                            hr;
-                            pre {
-                                (s.example)
-                            }
-                        }
-                        td style="border: 1px solid black;" {
-                            (render_run_ids(s.related.iter(), db)?)
                         }
                     }
+                }
             }
         }
     })

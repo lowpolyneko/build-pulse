@@ -93,7 +93,7 @@ macro_rules! fields {
         impl $name {
             #[doc = concat!("Iterate through all values of ", stringify!($name), ".")]
             #[allow(dead_code)]
-            pub fn iter() -> impl Iterator<Item = $name> {
+            pub fn iter() -> impl DoubleEndedIterator<Item = $name> {
                 vec![$($name::$member,)*].into_iter()
             }
         }
