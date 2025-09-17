@@ -140,7 +140,7 @@ where
             status,
             display_name: display_name.into(),
             log: match status {
-                Some(BuildStatus::Failure | BuildStatus::Unstable) => {
+                Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted) => {
                     // only get log on failure
                     match self.get_console(jenkins_client).await {
                         Ok(l) => Some(l.into()),

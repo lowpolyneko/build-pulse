@@ -138,7 +138,9 @@ async fn pull_build_logs(
 
                     log!(
                         match run.status {
-                            Some(BuildStatus::Failure | BuildStatus::Unstable) => Level::Warn,
+                            Some(
+                                BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted,
+                            ) => Level::Warn,
                             _ => Level::Info,
                         },
                         "Job '{}#{}' run '{}' finished with status {:?}.",

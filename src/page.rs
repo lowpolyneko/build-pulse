@@ -28,6 +28,19 @@ where
         .map_err(Error::from)
 }
 
+/// Format Option<BuildStatus> to string
+#[inline]
+fn status_as_str(status: Option<BuildStatus>) -> &'static str {
+    match status {
+        Some(BuildStatus::Success) => "good",
+        Some(BuildStatus::Failure) => "bad",
+        Some(BuildStatus::Unstable) => "unstable",
+        Some(BuildStatus::NotBuilt) => "not built",
+        Some(BuildStatus::Aborted) => "aborted",
+        None => "no build",
+    }
+}
+
 /// Render a [crate::api::SparseJob]
 fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Markup> {
     let last_build = match job.last_build {
@@ -40,9 +53,9 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
             sr.sort_by_cached_key(|r| match r.status {
                 Some(BuildStatus::Failure) => 0,
                 Some(BuildStatus::Unstable) => 1,
-                Some(BuildStatus::Success) => 2,
-                Some(BuildStatus::NotBuilt) => 3,
-                Some(BuildStatus::Aborted) => 4,
+                Some(BuildStatus::Aborted) => 2,
+                Some(BuildStatus::Success) => 3,
+                Some(BuildStatus::NotBuilt) => 4,
                 None => 4,
             });
 
@@ -75,18 +88,11 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
                 }
                 " was "
                 b {
-                    @match build.status {
-                        Some(BuildStatus::Success) => "good",
-                        Some(BuildStatus::Failure) => "bad",
-                        Some(BuildStatus::Unstable) => "unstable",
-                        Some(BuildStatus::NotBuilt) => "not built",
-                        Some(BuildStatus::Aborted) => "aborted",
-                        None => "no build",
-                    }
+                    (status_as_str(build.status))
                 }
             }
             @if let Some(runs) = sorted_runs {
-                details open[matches!(build.status, Some(BuildStatus::Failure))] {
+                details open[matches!(build.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
                     summary {
                         "Run Information"
                     }
@@ -108,23 +114,16 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
 /// Render a [Run]
 fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
     let row_border = match run.status {
-        Some(BuildStatus::Failure | BuildStatus::Unstable) => {
-            "border: 1px solid black; background-color: lightgray"
-        }
+        Some(BuildStatus::Failure) => "border: 1px solid black; background-color: lightpink",
+        Some(BuildStatus::Unstable) => "border: 1px solid black; background-color: wheat",
+        Some(BuildStatus::Aborted) => "border: 1px solid black; background-color: lightgray",
         _ => "border: 1px solid black;",
     };
     html! {
         tr #(run.id) style=(row_border) {
             td style="border: 1px solid black;" { // status
                 b {
-                    @match run.status {
-                        Some(BuildStatus::Success) => "good",
-                        Some(BuildStatus::Failure) => "bad",
-                        Some(BuildStatus::Unstable) => "unstable",
-                        Some(BuildStatus::NotBuilt) => "not built",
-                        Some(BuildStatus::Aborted) => "aborted",
-                        None => "no build",
-                    }
+                    (status_as_str(run.status))
                 }
             }
             td style="border: 1px solid black;" { // name
@@ -159,7 +158,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                             }
                             hr;
                         }
-                    } @else if matches!(run.status, Some(BuildStatus::Failure)) {
+                    } @else if matches!(run.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted)) {
                         b {
                             "Unknown issue(s)!"
                         }

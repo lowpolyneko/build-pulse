@@ -91,8 +91,11 @@ impl Statistics {
             .prepare(
                 "
                 SELECT r.id FROM runs r
-                WHERE r.status = ?
-                    AND NOT EXISTS (
+                WHERE (
+                        r.status = ?
+                        OR r.status = ?
+                        OR r.status = ?
+                    ) AND NOT EXISTS (
                         SELECT 1 FROM issues
                         JOIN tags ON tags.id = issues.tag_id
                         WHERE
@@ -104,6 +107,8 @@ impl Statistics {
             .query_map(
                 (
                     write_value!(Some(BuildStatus::Failure)),
+                    write_value!(Some(BuildStatus::Unstable)),
+                    write_value!(Some(BuildStatus::Aborted)),
                     write_value!(Severity::Metadata),
                 ),
                 |row| row.get(0),
