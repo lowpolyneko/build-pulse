@@ -41,7 +41,7 @@ post_process = ["./scripts/top.py"]
 path = '''graph_.*.svg'''
 
 [[artifact]]
-path = '''summary.junit.xml'''
+path = '''(summary.junit.xml)|(summary.txt)'''
 
 post_process = ["./scripts/junit.py"]
 
