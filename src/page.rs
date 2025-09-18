@@ -17,6 +17,7 @@ use crate::{
 };
 
 /// Format `time` as a [String]
+#[inline]
 fn format_timestamp<T>(time: T) -> Result<String>
 where
     T: Into<OffsetDateTime>,
@@ -120,7 +121,7 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
                     }
                     table {
                         @for run in runs {
-                            (render_run(&run, &db))
+                            (render_run(&run, db)?)
                         }
                     }
                 }
@@ -134,8 +135,9 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
 }
 
 /// Render a [Run]
-fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
-    html! {
+fn render_run(run: &InDatabase<Run>, db: &Database) -> Result<Markup> {
+    let issues = Issue::select_all_not_metadata(db, (db, run))?;
+    Ok(html! {
         tr #(run.id) class=[status_as_class(run.status)] {
             td { // status
                 b {
@@ -148,45 +150,50 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                 }
             }
             td { // issues
-                @if let Ok(issues) = Issue::select_all_not_metadata(db, (db, run)) {
-                    @if !issues.is_empty() {
-                        @if let Ok(tags) = TagInfo::select_all_by_run(db, run, ()) {
+                @if !issues.is_empty() {
+                    @let tags = TagInfo::select_all_by_run(db, run, ())?;
+                    b {
+                        "Identified Tags: "
+                    }
+                    @for t in tags {
+                        code title=(t.desc) {
+                            (t.name)
+                            ", "
+                        }
+                    }
+                    hr;
+                    @for i in issues {
+                        pre {
+                            (i.snippet)
+                        }
+                        @if i.duplicates > 0 {
                             b {
-                                "Identified Tags: "
+                                (i.duplicates)
+                                " duplicate emits"
                             }
-                            @for t in tags {
-                                code title=(t.desc) {
-                                    (t.name)
-                                    ", "
-                                }
-                            }
-                        }
-                        hr;
-                        @for i in issues {
-                            pre {
-                                (i.snippet)
-                            }
-                            @if i.duplicates > 0 {
-                                b {
-                                    (i.duplicates)
-                                    " duplicate emits"
-                                }
-                            }
-                            hr;
-                        }
-                    } @else if matches!(run.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted)) {
-                        b {
-                            "Unknown issue(s)!"
                         }
                         hr;
                     }
+                } @else if matches!(
+                    run.status,
+                    Some(
+                        BuildStatus::Failure
+                        | BuildStatus::Unstable
+                        | BuildStatus::Aborted
+                    ),
+                ) {
+                    b {
+                        "Unknown issue(s)!"
+                    }
+                    hr;
                 }
                 a href={(run.url) "/consoleFull"} {
                     "Full Build Log"
                 }
             }
             td { // artifacts
-                @if let Ok(artifacts) = Artifact::select_all_by_run(db, run.id, ()) && !artifacts.is_empty() {
+                @let artifacts = Artifact::select_all_by_run(db, run.id, ())?;
+                @if !artifacts.is_empty() {
                     @for a in artifacts.into_iter().map(|a| a.item()) {
                         details {
                             summary {
@@ -195,40 +202,14 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                                 }
                             }
                             hr;
-                            @match a.contents.as_slice() {
-                                [] => i {
-                                    "no data"
-                                },
-                                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] =>
-                                    // PNG magic
-                                    img src={
-                                        "data:image/png;base64,"
-                                        (Base64Display::new(&a.contents, &STANDARD))
-                                    };,
-                                _ => @match String::from_utf8(a.contents) {
-                                    Ok(blob) => @if blob.contains("<svg") {
-                                        // SVG XML data
-                                        img src={
-                                            "data:image/svg+xml;base64,"
-                                            (Base64Display::new(blob.as_bytes(), &STANDARD))
-                                        };
-                                    } @else {
-                                        pre {
-                                            (blob)
-                                        }
-                                    },
-                                    Err(_) => p {
-                                        "can't display"
-                                    }
-                                },
-                            }
+                            (render_artifact(a))
                             hr;
                         }
                     }
                 }
             }
         }
-    }
+    })
 }
 
 /// Render [crate::db::Statistics]
@@ -426,6 +407,7 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
     })
 }
 
+/// Render a list of [Run] ids as their display name
 fn render_run_ids<'a, T>(ids: T, db: &Database) -> Result<Markup>
 where
     T: ExactSizeIterator + Iterator<Item = &'a i64>,
@@ -454,6 +436,38 @@ where
     })
 }
 
+/// Render an [Artifact]
+fn render_artifact(a: Artifact) -> Markup {
+    html! {
+        @match a.contents.as_slice() {
+            [] => i {
+                "no data"
+            },
+            [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] =>
+                // PNG magic
+                img src={
+                    "data:image/png;base64,"
+                    (Base64Display::new(&a.contents, &STANDARD))
+                };,
+            _ => @match String::from_utf8(a.contents) {
+                Ok(blob) => @if blob.contains("<svg") {
+                    // SVG XML data
+                    img src={
+                        "data:image/svg+xml;base64,"
+                        (Base64Display::new(blob.as_bytes(), &STANDARD))
+                    };
+                } @else {
+                    pre {
+                        (blob)
+                    }
+                },
+                Err(_) => p {
+                    "can't display"
+                }
+            },
+        }
+    }
+}
 /// Render an HTML report for [Database] info
 pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup> {
     Ok(html! {
