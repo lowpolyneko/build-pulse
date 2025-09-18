@@ -2,8 +2,16 @@ table,tr,td {
 	border: 1px solid black;
 }
 
-pre {
+table,tr {
+	width: 90%;
+}
+
+td {
 	max-width: 80ch;
+}
+
+pre {
+	max-width: 100%;
 	max-height: 40ch;
 	overflow: auto;
 }

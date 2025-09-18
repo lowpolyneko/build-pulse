@@ -119,10 +119,9 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
                     summary {
                         "Run Information"
                     }
-                    table {
-                        @for run in runs {
-                            (render_run(&run, db)?)
-                        }
+                    @for run in runs {
+                        (render_run(&run, db)?)
+                        br;
                     }
                 }
             }
@@ -138,72 +137,93 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
 fn render_run(run: &InDatabase<Run>, db: &Database) -> Result<Markup> {
     let issues = Issue::select_all_not_metadata(db, (db, run))?;
     Ok(html! {
-        tr #(run.id) class=[status_as_class(run.status)] {
-            td { // status
-                b {
-                    (status_as_str(run.status))
-                }
-            }
-            td { // name
-                a href=(run.url) {
-                    (run.display_name)
-                }
-            }
-            td { // issues
-                @if !issues.is_empty() {
-                    @let tags = TagInfo::select_all_by_run(db, run, ())?;
+        table {
+            tr #(run.id) class=[status_as_class(run.status)] {
+                td rowspan="2" { // status
                     b {
-                        "Identified Tags: "
+                        (status_as_str(run.status))
                     }
-                    @for t in tags {
-                        code title=(t.desc) {
-                            (t.name)
-                            ", "
-                        }
+                }
+                td rowspan="2" { // name
+                    a href=(run.url) {
+                        (run.display_name)
                     }
-                    hr;
-                    @for i in issues {
-                        pre {
-                            (i.snippet)
-                        }
-                        @if i.duplicates > 0 {
-                            b {
-                                (i.duplicates)
-                                " duplicate emits"
+                }
+                td { // name
+                    b {
+                        "Identified Tags"
+                    }
+                }
+            }
+            tr #(run.id) class=[status_as_class(run.status)] {
+                td { // tags
+                    @let tags = TagInfo::select_all_by_run(db, run, ())?;
+                    @if !tags.is_empty() {
+                        @for t in tags {
+                            code title=(t.desc) {
+                                (t.name)
+                                ", "
                             }
                         }
-                        hr;
+                    } @else {
+                        i {
+                            "untagged!"
+                        }
                     }
-                } @else if matches!(
-                    run.status,
-                    Some(
-                        BuildStatus::Failure
-                        | BuildStatus::Unstable
-                        | BuildStatus::Aborted
-                    ),
-                ) {
-                    b {
-                        "Unknown issue(s)!"
-                    }
-                    hr;
-                }
-                a href={(run.url) "/consoleFull"} {
-                    "Full Build Log"
                 }
             }
-            td { // artifacts
-                @let artifacts = Artifact::select_all_by_run(db, run.id, ())?;
-                @if !artifacts.is_empty() {
-                    @for a in artifacts.into_iter().map(|a| a.item()) {
-                        details {
-                            summary {
+            @if !issues.is_empty() {
+                @for i in issues {
+                    tr class=[status_as_class(run.status)] {
+                        td colspan="3" { // issues
+                            pre {
+                                (i.snippet)
+                            }
+                            @if i.duplicates > 0 {
                                 b {
-                                    (a.path)
+                                    (i.duplicates)
+                                    " duplicate emits"
                                 }
                             }
-                            hr;
-                            (render_artifact(a))
-                            hr;
+                        }
+                    }
+                }
+            } @else if matches!(
+                run.status,
+                Some(
+                    BuildStatus::Failure
+                    | BuildStatus::Unstable
+                    | BuildStatus::Aborted
+                ),
+            ) {
+                tr class=[status_as_class(run.status)] {
+                    td colspan="3" { // issues
+                        b {
+                            "Unknown issue(s)!"
+                        }
+                    }
+                }
+            }
+            tr class=[status_as_class(run.status)] {
+                td colspan="3" { // issues
+                    a href={(run.url) "/consoleFull"} {
+                        "Full Build Log"
+                    }
+                }
+            }
+            @let artifacts = Artifact::select_all_by_run(db, run.id, ())?;
+            @if !artifacts.is_empty() {
+                @for a in artifacts.into_iter().map(|a| a.item()) {
+                    tr class=[status_as_class(run.status)] {
+                        td colspan="3" { // artifacts
+                            details {
+                                summary {
+                                    b {
+                                        (a.path)
+                                    }
+                                }
+                                (render_artifact(a))
+                            }
                         }
                     }
                 }
