@@ -1,0 +1,21 @@
+table,tr,td {
+	border: 1px solid black;
+}
+
+pre {
+	max-width: 80ch;
+	max-height: 40ch;
+	overflow: auto;
+}
+
+.error {
+	background-color: lightpink;
+}
+
+.warning {
+	background-color: wheat;
+}
+
+.info {
+	background-color: lightgray;
+}

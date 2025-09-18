@@ -8,7 +8,7 @@ use maud::{DOCTYPE, Markup, html};
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
 
 use crate::{
-    config::TagView,
+    config::{Severity, TagView},
     db::{
         Artifact, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, Similarity,
         Statistics, TagInfo,
@@ -28,7 +28,7 @@ where
         .map_err(Error::from)
 }
 
-/// Format Option<BuildStatus> to string
+/// Format [Option<BuildStatus>] to string
 #[inline]
 fn status_as_str(status: Option<BuildStatus>) -> &'static str {
     match status {
@@ -38,6 +38,28 @@ fn status_as_str(status: Option<BuildStatus>) -> &'static str {
         Some(BuildStatus::NotBuilt) => "not built",
         Some(BuildStatus::Aborted) => "aborted",
         None => "no build",
+    }
+}
+
+/// Format [Option<BuildStatus>] as class name
+#[inline]
+fn status_as_class(status: Option<BuildStatus>) -> Option<&'static str> {
+    match status {
+        Some(BuildStatus::Failure) => Some("error"),
+        Some(BuildStatus::Unstable) => Some("warning"),
+        Some(BuildStatus::Aborted) => Some("info"),
+        _ => None,
+    }
+}
+
+/// Format [Severity] as class name
+#[inline]
+fn severity_as_class(severity: Severity) -> Option<&'static str> {
+    match severity {
+        Severity::Error => Some("error"),
+        Severity::Warning => Some("warning"),
+        Severity::Info => Some("info"),
+        _ => None,
     }
 }
 
@@ -96,7 +118,7 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
                     summary {
                         "Run Information"
                     }
-                    table style="border: 1px solid black;" {
+                    table {
                         @for run in runs {
                             (render_run(&run, &db))
                         }
@@ -113,25 +135,19 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
 
 /// Render a [Run]
 fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
-    let row_border = match run.status {
-        Some(BuildStatus::Failure) => "border: 1px solid black; background-color: lightpink",
-        Some(BuildStatus::Unstable) => "border: 1px solid black; background-color: wheat",
-        Some(BuildStatus::Aborted) => "border: 1px solid black; background-color: lightgray",
-        _ => "border: 1px solid black;",
-    };
     html! {
-        tr #(run.id) style=(row_border) {
-            td style="border: 1px solid black;" { // status
+        tr #(run.id) class=[status_as_class(run.status)] {
+            td { // status
                 b {
                     (status_as_str(run.status))
                 }
             }
-            td style="border: 1px solid black;" { // name
+            td { // name
                 a href=(run.url) {
                     (run.display_name)
                 }
             }
-            td style="border: 1px solid black;" { // issues
+            td { // issues
                 @if let Ok(issues) = Issue::select_all_not_metadata(db, (db, run)) {
                     @if !issues.is_empty() {
                         @if let Ok(tags) = TagInfo::select_all_by_run(db, run, ()) {
@@ -169,7 +185,7 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Markup {
                     "Full Build Log"
                 }
             }
-            td style="border: 1px solid black;" { // artifacts
+            td { // artifacts
                 @if let Ok(artifacts) = Artifact::select_all_by_run(db, run.id, ()) && !artifacts.is_empty() {
                     @for a in artifacts.into_iter().map(|a| a.item()) {
                         details {
@@ -235,54 +251,54 @@ fn render_stats(db: &Database) -> Result<Markup> {
         h4 {
             "Run Status"
         }
-        table style="border: 1px solid black;" {
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+        table {
+            tr {
+                td {
                     "Failures"
                 }
-                td style="border: 1px solid black;" {
+                td {
                     (render_run_ids(stats.failures.iter(), db)?)
                 }
             }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+            tr {
+                td {
                     "Unstable"
                 }
-                td style="border: 1px solid black;" {
+                td {
                     (render_run_ids(stats.unstable.iter(), db)?)
                 }
             }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+            tr {
+                td {
                     "Healthy"
                 }
-                td style="border: 1px solid black;" {
+                td {
                     (render_run_ids(stats.successful.iter(), db)?)
                 }
             }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+            tr {
+                td {
                     "Aborted"
                 }
-                td style="border: 1px solid black;" {
+                td {
                     (render_run_ids(stats.aborted.iter(), db)?)
                 }
             }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+            tr {
+                td {
                     "Not Built"
                 }
-                td style="border: 1px solid black;" {
+                td {
                     (render_run_ids(stats.not_built.iter(), db)?)
                 }
             }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+            tr {
+                td {
                     b {
                         "Total"
                     }
                 }
-                td style="border: 1px solid black;" {
+                td {
                     b {
                         (stats.successful.len()
                          + stats.failures.len()
@@ -295,27 +311,27 @@ fn render_stats(db: &Database) -> Result<Markup> {
             }
         }
         br;
-        table style="border: 1px solid black;" {
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+        table {
+            tr {
+                td {
                     b {
                         "Issues Found"
                     }
                 }
-                td style="border: 1px solid black;" {
+                td {
                     b {
                         (stats.issues_found)
                         " issues"
                     }
                 }
             }
-            tr style="border: 1px solid black;" {
-                td style="border: 1px solid black;" {
+            tr {
+                td {
                     b {
                         "Unknown Issues"
                     }
                 }
-                td style="border: 1px solid black;" {
+                td {
                     b {
                         (render_run_ids(stats.unknown_runs.iter(), db)?)
                     }
@@ -347,15 +363,15 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                     summary {
                         (severity)
                     }
-                    table style="border: 1px solid black;" {
+                    table {
                         @for s in similarities {
-                            tr style="border: 1px solid black; background-color: lightgray" {
-                                td style="border: 1px solid black;" {
+                            tr class=[severity_as_class(s.tag.severity)] {
+                                td {
                                     code title=(s.tag.desc) {
                                         (s.tag.name)
                                     }
                                 }
-                                td style="border: 1px solid black;" {
+                                td {
                                     b {
                                         "Example Snippet"
                                     }
@@ -364,7 +380,7 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                                         (s.example)
                                     }
                                 }
-                                td style="border: 1px solid black;" {
+                                td {
                                     (render_run_ids(s.related.iter(), db)?)
                                 }
                             }
@@ -390,17 +406,17 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
         h4 {
             (view.name)
         }
-        table style="border: 1px solid black;" {
+        table {
             @for expr in rows {
                 @let matches = Run::select_all_id_by_expr(db, &expr)?;
                 @if !matches.is_empty() {
-                    tr style="border: 1px solid black;" {
-                        td style="border: 1px solid black;" {
+                    tr {
+                        td {
                             code {
                                 (expr)
                             }
                         }
-                        td style="border: 1px solid black;" {
+                        td {
                             (render_run_ids(matches.iter(), db)?)
                         }
                     }
@@ -448,6 +464,7 @@ pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup>
                     "build-pulse report"
                 }
                 meta charset="utf-8";
+                link rel="stylesheet" type="text/css" href="static/style.css";
             }
             body {
                 h1 {
