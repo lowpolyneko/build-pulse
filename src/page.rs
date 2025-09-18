@@ -252,7 +252,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
         h4 {
             "Run Status"
         }
-        table {
+        table class="view" {
             tr {
                 td {
                     "Failures"
@@ -312,7 +312,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
             }
         }
         br;
-        table {
+        table class="view" {
             tr {
                 td {
                     b {
@@ -359,13 +359,19 @@ fn render_similarities(db: &Database) -> Result<Markup> {
             "Related Issues by Severity"
         }
         @for severity in crate::config::Severity::iter().rev() {
-            @if let Some(similarities) = similarities.get(&severity) {
+            @if let Some(similarities) = similarities.get(&severity)
+                && !similarities.is_empty() {
                 details open[matches!(severity, crate::config::Severity::Error)] {
                     summary {
                         (severity)
+                        " - "
+                        i {
+                            (similarities.len())
+                            " group(s)"
+                        }
                     }
-                    table {
-                        @for s in similarities {
+                    @for s in similarities {
+                        table {
                             tr class=[severity_as_class(s.tag.severity)] {
                                 td {
                                     code title=(s.tag.desc) {
@@ -373,6 +379,11 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                                     }
                                 }
                                 td {
+                                    (render_run_ids(s.related.iter(), db)?)
+                                }
+                            }
+                            tr class=[severity_as_class(s.tag.severity)] {
+                                td colspan="2" {
                                     b {
                                         "Example Snippet"
                                     }
@@ -381,11 +392,9 @@ fn render_similarities(db: &Database) -> Result<Markup> {
                                         (s.example)
                                     }
                                 }
-                                td {
-                                    (render_run_ids(s.related.iter(), db)?)
-                                }
                             }
                         }
+                        br;
                     }
                 }
             }
@@ -407,7 +416,7 @@ fn render_view(view: &TagView, db: &Database) -> Result<Markup> {
         h4 {
             (view.name)
         }
-        table {
+        table class="view" {
             @for expr in rows {
                 @let matches = Run::select_all_id_by_expr(db, &expr)?;
                 @if !matches.is_empty() {

@@ -3,15 +3,11 @@ table,tr,td {
 }
 
 table,tr {
-	width: 90%;
-}
-
-td {
-	max-width: 80ch;
+	width: 90vw;
 }
 
 pre {
-	max-width: 100%;
+	max-width: 88vw;
 	max-height: 40ch;
 	overflow: auto;
 }
@@ -26,4 +22,8 @@ pre {
 
 .info {
 	background-color: lightgray;
+}
+
+.view {
+	width: auto;
 }
