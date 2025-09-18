@@ -60,6 +60,18 @@ from = "Console"
 severity = "Error"
 
 [[tag]]
+name = "cc_warn"
+desc = "CC Compiler Warning"
+
+# Matches messages of the following
+# <filepath>:<lineno>:<linecol?>: error: <message>\n
+#  <indented followups>\n
+# https://www.gnu.org/prep/standards/html_node/Errors.html
+pattern = '''(?m)^[a-zA-Z0-9_\-\./ ]+([\.\-:][0-9]+){0,4}: warning: .*(\n\s+.*)*(\n[a-zA-Z0-9_\-\./ ]+([\.\-:][0-9]+){0,4}: [a-z]+: .*(\n\s+.*)*)*$'''
+from = "Artifact"
+severity = "Warning"
+
+[[tag]]
 name = "nvcxx_emit"
 desc = "NVC++ Compiler Error"
 
