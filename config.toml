@@ -24,7 +24,11 @@ expr = '!S"Metadata"'
 
 [[view]]
 name = "By Metadata"
-expr = 'S"Metadata"'
+expr = '!t"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|(softiron-[0-9]+)" && S"Metadata"'
+
+[[view]]
+name = "By Agent"
+expr = 'T"(pmrs-.*)|(built-in)|(aws)|(tiger)|(yuzu)|(softiron-[0-9]+)"'
 
 [[view]]
 name = "Jenkins Failures By Platform"
