@@ -1,4 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    cmp::Reverse,
+    collections::{HashMap, HashSet},
+};
+
+use arcstr::Substr;
 
 use crate::{
     db::{InDatabase, Issue, Queryable, Run, TagInfo},
@@ -14,7 +19,7 @@ pub struct SimilarityInfo {
 pub struct Similarity {
     pub tag: InDatabase<TagInfo>,
     pub related: HashSet<i64>,
-    pub example: String,
+    pub example: Substr,
 }
 
 schema! {
@@ -79,8 +84,8 @@ impl Similarity {
                             issue_id,
                             (db, &Run::select_one(db, run_id, ())?),
                         )?
-                        .snippet
-                        .to_string(),
+                        .item()
+                        .snippet,
                     }
                 })
                 .related
@@ -89,6 +94,9 @@ impl Similarity {
             Ok::<_, rusqlite::Error>(())
         })?;
 
-        Ok(hm.into_values().collect())
+        let mut similarities: Vec<_> = hm.into_values().collect();
+        similarities.sort_by_cached_key(|s| Reverse(s.related.len()));
+
+        Ok(similarities)
     }
 }
