@@ -152,7 +152,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arcstr",
- "base64",
  "chumsky",
  "clap",
  "env_logger",

@@ -1,8 +1,7 @@
 //! HTML report generation using [maud] templating.
-use std::{collections::HashMap, time::SystemTime};
+use std::{collections::HashMap, str::from_utf8_unchecked, time::SystemTime};
 
 use anyhow::{Error, Result};
-use base64::{display::Base64Display, engine::general_purpose::STANDARD};
 use jenkins_api::build::BuildStatus;
 use maud::{DOCTYPE, Markup, html};
 use time::{OffsetDateTime, UtcOffset, macros::format_description};
@@ -10,8 +9,8 @@ use time::{OffsetDateTime, UtcOffset, macros::format_description};
 use crate::{
     config::{Severity, TagView},
     db::{
-        Artifact, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, Similarity,
-        Statistics, TagInfo,
+        Artifact, BlobFormat, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run,
+        Similarity, Statistics, TagInfo,
     },
     tag_expr::TagExpr,
 };
@@ -212,17 +211,23 @@ fn render_run(run: &InDatabase<Run>, db: &Database) -> Result<Markup> {
                 }
             }
             @let artifacts = Artifact::select_all_by_run(db, run.id, ())?;
-            @if !artifacts.is_empty() {
-                @for a in artifacts.into_iter().map(|a| a.item()) {
-                    tr class=[status_as_class(run.status)] {
-                        td colspan="3" { // artifacts
-                            details {
-                                summary {
-                                    b {
-                                        (a.path)
-                                    }
+            @for a in artifacts {
+                tr class=[status_as_class(run.status)] {
+                    td colspan="3" { // artifacts
+                        details {
+                            summary {
+                                b {
+                                    (a.path)
                                 }
-                                (render_artifact(a))
+                            }
+                            @match a.blob_format() {
+                                BlobFormat::Png | BlobFormat::Svg => img src={"artifacts/" (a.id)};,
+                                BlobFormat::Utf8 => pre { (unsafe {
+                                    // SAFETY: `blob_format` checks if contents is valid UTF-8
+                                    from_utf8_unchecked(&a.contents)
+                                }) },
+                                BlobFormat::Unknown => i { "can't display" },
+                                BlobFormat::Null => i { "no data" },
                             }
                         }
                     }
@@ -465,38 +470,6 @@ where
     })
 }
 
-/// Render an [Artifact]
-fn render_artifact(a: Artifact) -> Markup {
-    html! {
-        @match a.contents.as_slice() {
-            [] => i {
-                "no data"
-            },
-            [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] =>
-                // PNG magic
-                img src={
-                    "data:image/png;base64,"
-                    (Base64Display::new(&a.contents, &STANDARD))
-                };,
-            _ => @match String::from_utf8(a.contents) {
-                Ok(blob) => @if blob.contains("<svg") {
-                    // SVG XML data
-                    img src={
-                        "data:image/svg+xml;base64,"
-                        (Base64Display::new(blob.as_bytes(), &STANDARD))
-                    };
-                } @else {
-                    pre {
-                        (blob)
-                    }
-                },
-                Err(_) => p {
-                    "can't display"
-                }
-            },
-        }
-    }
-}
 /// Render an HTML report for [Database] info
 pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup> {
     Ok(html! {

@@ -2,4 +2,4 @@
 .direnv/
 report.html
 data.db
-log.txt
+artifacts/

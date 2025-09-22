@@ -12,6 +12,15 @@ pub struct Artifact {
     pub run_id: i64,
 }
 
+/// File type of an [Artifact]'s blob/contents
+pub enum BlobFormat {
+    Png,
+    Svg,
+    Unknown,
+    Utf8,
+    Null,
+}
+
 schema! {
     artifacts for Artifact {
         id              INTEGER PRIMARY KEY,
@@ -55,5 +64,18 @@ impl Artifact {
         )?
         .query_map((run_id,), Self::map_row(params))?
         .collect()
+    }
+
+    /// Gets the [BlobFormat] of the [Artifact]
+    pub fn blob_format(&self) -> BlobFormat {
+        match self.contents[..] {
+            [] => BlobFormat::Null,
+            [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] => BlobFormat::Png, // PNG magic
+            _ => match std::str::from_utf8(&self.contents) {
+                Ok(blob) if blob.contains("<svg") => BlobFormat::Svg, // SVG XML data
+                Ok(_) => BlobFormat::Utf8,
+                Err(_) => BlobFormat::Unknown,
+            },
+        }
     }
 }
