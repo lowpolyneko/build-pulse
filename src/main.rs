@@ -59,6 +59,38 @@ struct Args {
     purge_cache: bool,
 }
 
+/// Spawns a process, pipes stdin, and waits for stdout
+#[inline]
+async fn spawn_process<I, S>(
+    program: S,
+    args: I,
+    run_name: &str,
+    run_url: &str,
+    stdin: &[u8],
+) -> std::io::Result<Vec<u8>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut child = Command::new(program)
+        .args(args)
+        .env("BUILD_PULSE_RUN_NAME", run_name)
+        .env("BUILD_PULSE_RUN_URL", run_url)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    child
+        .stdin
+        .take()
+        .ok_or(std::io::Error::from(std::io::ErrorKind::NotFound))?
+        .write_all(stdin)
+        .await?;
+
+    Ok(child.wait_with_output().await?.stdout)
+}
+
 /// Pull builds from `project.jobs` and cache them into database `db`
 async fn pull_build_logs(
     project: SparseMatrixProject,
@@ -116,19 +148,9 @@ async fn pull_build_logs(
                                 c.post_process.as_ref().map(|argv| argv.iter())
                                 && let Some(program) = iter.next()
                             {
-                                // pipe artifact to subprocess
-                                let mut child = Command::new(program)
-                                    .args(iter)
-                                    .env("BUILD_PULSE_RUN_NAME", run.display_name.as_str())
-                                    .env("BUILD_PULSE_RUN_URL", &run.url)
-                                    .stdin(Stdio::piped())
-                                    .stdout(Stdio::piped())
-                                    .kill_on_drop(true)
-                                    .spawn()
-                                    .unwrap();
-
-                                child.stdin.take().unwrap().write_all(&blob).await.unwrap();
-                                child.wait_with_output().await.unwrap().stdout
+                                spawn_process(program, iter, &run.display_name, &run.url, &blob)
+                                    .await
+                                    .unwrap()
                             } else {
                                 blob.to_vec()
                             };
@@ -391,25 +413,9 @@ async fn copy_artifacts<P: AsRef<Path>>(
                     && let Some(mut iter) = c.render.as_ref().map(|argv| argv.iter())
                     && let Some(program) = iter.next()
                 {
-                    // pipe artifact to subprocess
-                    let mut child = Command::new(program)
-                        .args(iter)
-                        .env("BUILD_PULSE_RUN_NAME", display_name.as_str())
-                        .env("BUILD_PULSE_RUN_URL", &url)
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::piped())
-                        .kill_on_drop(true)
-                        .spawn()
-                        .unwrap();
-
-                    child
-                        .stdin
-                        .take()
-                        .unwrap()
-                        .write_all(&artifact.contents)
+                    spawn_process(program, iter, &display_name, &url, &artifact.contents)
                         .await
-                        .unwrap();
-                    child.wait_with_output().await.unwrap().stdout
+                        .unwrap()
                 } else {
                     artifact.item().contents
                 };
