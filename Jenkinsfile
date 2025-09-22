@@ -35,7 +35,7 @@ pipeline {
         stage('package') {
             steps {
                 echo 'Archiving artifacts...'
-                archiveArtifacts artifacts: 'target/release/build-pulse,report.html,data.db,config.toml,static/*'
+                archiveArtifacts artifacts: 'target/release/build-pulse,report.html,data.db,config.toml,static/*,artifacts/*'
             }
         }
     }
