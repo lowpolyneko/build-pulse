@@ -145,6 +145,12 @@ impl Run {
             .query_one((id,), |row| row.get(0))
     }
 
+    /// Get a [Run]'s url by id in [super::Database]
+    pub fn select_one_url(db: &super::Database, id: i64) -> rusqlite::Result<String> {
+        db.prepare_cached("SELECT url FROM runs WHERE id = ?")?
+            .query_one((id,), |row| row.get(0))
+    }
+
     /// Check whether or not there are untagged [Run]s in [super::Database]
     pub fn has_untagged(db: &super::Database) -> rusqlite::Result<bool> {
         db.prepare_cached("SELECT 1 FROM runs WHERE tag_schema IS NULL")?

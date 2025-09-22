@@ -1,6 +1,7 @@
 //! A Jenkins CI/CD-based build analyzer and issue prioritizer.
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
+    path::Path,
     process::Stdio,
     str::from_utf8,
     sync::Arc,
@@ -367,6 +368,64 @@ async fn calculate_similarities(
     Ok(())
 }
 
+/// Copies the rendered versions of every [Artifact] into `folder`
+async fn copy_artifacts<P: AsRef<Path>>(
+    folder: P,
+    artifacts: Arc<[(Regex, ConfigArtifact)]>,
+    db: &Database,
+) -> Result<()> {
+    // create dir first
+    fs::create_dir_all(&folder).await?;
+
+    // render and copy
+    let mut handles: JoinSet<_> = Artifact::select_all(db, ())?
+        .into_iter()
+        .map(|artifact| {
+            let artifacts = artifacts.clone();
+            let display_name = Run::select_one_display_name(db, artifact.run_id)?;
+            let url = Run::select_one_url(db, artifact.run_id)?;
+            let path = folder.as_ref().join(artifact.id.to_string());
+            Ok(async move {
+                let blob = if let Some((_, c)) =
+                    artifacts.iter().find(|(re, _)| re.is_match(&artifact.path))
+                    && let Some(mut iter) = c.render.as_ref().map(|argv| argv.iter())
+                    && let Some(program) = iter.next()
+                {
+                    // pipe artifact to subprocess
+                    let mut child = Command::new(program)
+                        .args(iter)
+                        .env("BUILD_PULSE_RUN_NAME", display_name.as_str())
+                        .env("BUILD_PULSE_RUN_URL", &url)
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .kill_on_drop(true)
+                        .spawn()
+                        .unwrap();
+
+                    child
+                        .stdin
+                        .take()
+                        .unwrap()
+                        .write_all(&artifact.contents)
+                        .await
+                        .unwrap();
+                    child.wait_with_output().await.unwrap().stdout
+                } else {
+                    artifact.item().contents
+                };
+
+                fs::write(path, blob).await.unwrap()
+            })
+        })
+        .collect::<Result<_>>()?;
+
+    while let Some(h) = handles.join_next().await {
+        h?;
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -391,6 +450,11 @@ async fn main() -> Result<()> {
         view,
     } = toml::from_str(&fs::read_to_string(args.config).await?)?;
     let tags = TagSet::from_config(tag)?;
+    let artifact: Arc<[_]> = artifact
+        .into_iter()
+        .map(|a| Regex::new(&a.path).map(|re| (re, a)))
+        .collect::<Result<Vec<_>, _>>()?
+        .into();
 
     // open db
     info!("Opening database...");
@@ -437,11 +501,7 @@ async fn main() -> Result<()> {
     let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
     let runs = pull_build_logs(
         project,
-        artifact
-            .into_iter()
-            .map(|a| Regex::new(&a.path).map(|re| (re, a)))
-            .collect::<Result<Vec<_>, _>>()?
-            .into(),
+        artifact.clone(),
         &blocklist,
         jenkins.into(),
         &database,
@@ -477,6 +537,8 @@ async fn main() -> Result<()> {
 
     if let Some(output) = args.output {
         info!("Generating report...");
+
+        copy_artifacts("artifacts", artifact, &database).await?;
 
         let markup = task::spawn_blocking(move || {
             page::render(

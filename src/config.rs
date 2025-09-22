@@ -48,6 +48,9 @@ pub struct ConfigArtifact {
 
     /// Executable to pipe artifact data into for processing
     pub post_process: Option<Vec<String>>,
+
+    /// Executable to pipe artifact data into for rendering
+    pub render: Option<Vec<String>>,
 }
 
 /// Represesnts one [crate::parse::Tag] view to be rendered
