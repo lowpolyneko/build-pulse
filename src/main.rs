@@ -22,6 +22,7 @@ use tokio::{
     fs,
     io::AsyncWriteExt,
     process::Command,
+    sync::Semaphore,
     task::{self, JoinSet},
 };
 
@@ -58,6 +59,18 @@ struct Args {
     /// Whether or not to purge cache
     #[arg(short, long)]
     purge_cache: bool,
+}
+
+// [reqwest] will open new connections until the system `ulimit`,
+// we have to limit parallelism ourselves
+static RATE_LIMIT: Semaphore = Semaphore::const_new(20);
+macro_rules! rate_limit {
+    ($closure:expr) => {
+        async move {
+            let _permit = RATE_LIMIT.acquire().await.unwrap();
+            $closure.await // _permit dropped here
+        }
+    };
 }
 
 /// Spawns a process, pipes stdin, and waits for stdout
@@ -174,77 +187,79 @@ async fn pull_build_logs(
                  job,
                  build,
                  mb,
-             }| async move {
-                let full_build: Arc<_> = mb.get_full_build(&jenkins).await.unwrap().into();
-                let run = full_build.as_run(build.id, &jenkins).await;
+             }| {
+                rate_limit!(async move {
+                    let full_build: Arc<_> = mb.get_full_build(&jenkins).await.unwrap().into();
+                    let run = full_build.as_run(build.id, &jenkins).await;
 
-                let artifacts = artifacts.clone();
-                let display_name = run.display_name.clone();
-                let url = run.url.clone();
-                let artifacts: JoinSet<_> = full_build
-                    .clone()
-                    .artifacts
-                    .iter()
-                    .filter_map(move |artifact| {
-                        let jenkins = jenkins.clone();
-                        let full_build = full_build.clone();
-                        let artifact = artifact.clone();
-                        let display_name = display_name.clone();
-                        let url = url.clone();
-                        artifacts
-                            .iter()
-                            .find(|(re, _)| re.is_match(&artifact.relative_path))
-                            .map(move |(_, c)| {
-                                let post_process = c.post_process.clone();
-                                async move {
-                                    let blob = full_build
-                                        .get_artifact(&jenkins, &artifact)
-                                        .await
-                                        .inspect_err(|e| {
-                                            log::error!(
-                                                "Failed to retrieve artifact for run {}: {}",
-                                                &display_name,
-                                                e
-                                            )
-                                        })
-                                        .ok()?;
-
-                                    let contents = if let Some(mut iter) =
-                                        post_process.as_ref().map(|argv| argv.iter())
-                                        && let Some(program) = iter.next()
-                                    {
-                                        spawn_process(program, iter, &display_name, &url, &blob)
+                    let artifacts = artifacts.clone();
+                    let display_name = run.display_name.clone();
+                    let url = run.url.clone();
+                    let artifacts: JoinSet<_> = full_build
+                        .clone()
+                        .artifacts
+                        .iter()
+                        .filter_map(move |artifact| {
+                            let jenkins = jenkins.clone();
+                            let full_build = full_build.clone();
+                            let artifact = artifact.clone();
+                            let display_name = display_name.clone();
+                            let url = url.clone();
+                            artifacts
+                                .iter()
+                                .find(|(re, _)| re.is_match(&artifact.relative_path))
+                                .map(move |(_, c)| {
+                                    let post_process = c.post_process.clone();
+                                    rate_limit!(async move {
+                                        let blob = full_build
+                                            .get_artifact(&jenkins, &artifact)
                                             .await
-                                            .unwrap()
-                                    } else {
-                                        blob.to_vec()
-                                    };
+                                            .inspect_err(|e| {
+                                                log::error!(
+                                                    "Failed to retrieve artifact for run {}: {}",
+                                                    &display_name,
+                                                    e
+                                                )
+                                            })
+                                            .ok()?;
 
-                                    Some(|run_id| Artifact {
-                                        path: artifact.relative_path,
-                                        contents,
-                                        run_id,
+                                        let contents = if let Some(mut iter) =
+                                            post_process.as_ref().map(|argv| argv.iter())
+                                            && let Some(program) = iter.next()
+                                        {
+                                            spawn_process(program, iter, &display_name, &url, &blob)
+                                                .await
+                                                .unwrap()
+                                        } else {
+                                            blob.to_vec()
+                                        };
+
+                                        Some(|run_id| Artifact {
+                                            path: artifact.relative_path,
+                                            contents,
+                                            run_id,
+                                        })
                                     })
-                                }
-                            })
-                    })
-                    .collect();
+                                })
+                        })
+                        .collect();
 
-                log!(
-                    match run.status {
-                        Some(
-                            BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted,
-                        ) => Level::Warn,
-                        _ => Level::Info,
-                    },
-                    "Job '{}#{}' run '{}' finished with status {:?}.",
-                    job.name,
-                    build.number,
-                    run.display_name,
-                    run.status
-                );
+                    log!(
+                        match run.status {
+                            Some(
+                                BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted,
+                            ) => Level::Warn,
+                            _ => Level::Info,
+                        },
+                        "Job '{}#{}' run '{}' finished with status {:?}.",
+                        job.name,
+                        build.number,
+                        run.display_name,
+                        run.status
+                    );
 
-                (run, artifacts)
+                    (run, artifacts)
+                })
             },
         )
         .collect();
