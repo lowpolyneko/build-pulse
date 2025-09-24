@@ -12,6 +12,8 @@ blocklist = [
 # password = <OPTIONAL: your password>
 
 threshold = 0.9
+last_n_history = 5
+
 timezone = -5 # in UTC-<hour> format
 
 database = "data.db"

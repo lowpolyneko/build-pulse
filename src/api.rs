@@ -28,7 +28,7 @@ pub struct SparseJob {
     pub url: String,
 
     /// Last build of job as a [SparseBuild]
-    pub last_build: Option<SparseBuild>,
+    pub builds: Vec<SparseBuild>,
 }
 
 /// Represents a job build pulled from [SparseMatrixProject::pull_jobs]
@@ -110,7 +110,7 @@ impl AsJob for SparseJob {
     fn as_job(&self) -> crate::db::Job {
         crate::db::Job {
             name: self.name.clone(),
-            last_build: self.last_build.as_ref().map(|b| b.number),
+            last_build: self.builds.first().map(|b| b.number),
             url: self.url.clone(),
         }
     }
@@ -170,7 +170,7 @@ impl SparseMatrixProject {
                             .with_subfield("name")
                             .with_subfield("url")
                             .with_subfield(
-                                TreeBuilder::object("lastBuild")
+                                TreeBuilder::object("builds")
                                     .with_subfield("number")
                                     .with_subfield("url")
                                     .with_subfield("displayName")

@@ -1,5 +1,6 @@
 //! A Jenkins CI/CD-based build analyzer and issue prioritizer.
 use std::{
+    cell::Cell,
     hash::{DefaultHasher, Hash, Hasher},
     path::Path,
     process::Stdio,
@@ -12,7 +13,7 @@ use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
 use jenkins_api::{
     Jenkins, JenkinsBuilder,
-    build::{Build, BuildStatus},
+    build::{Build, BuildStatus, ShortBuild},
 };
 use log::{Level, info, log, warn};
 use regex::Regex;
@@ -25,7 +26,7 @@ use tokio::{
 };
 
 use crate::{
-    api::{AsBuild, AsJob, AsRun, SparseBuild, SparseMatrixProject},
+    api::{AsBuild, AsJob, AsRun, SparseMatrixProject},
     config::{Config, ConfigArtifact, Field, Severity},
     db::{
         Artifact, Database, InDatabase, Issue, Job, JobBuild, Queryable, Run, SimilarityInfo,
@@ -96,108 +97,171 @@ async fn pull_build_logs(
     project: SparseMatrixProject,
     artifacts: Arc<[(Regex, ConfigArtifact)]>,
     blocklist: &[String],
+    last_n_history: usize,
     jenkins: Arc<Jenkins>,
     db: &Database,
 ) -> Result<Vec<InDatabase<Run>>> {
-    let mut handles = JoinSet::new();
-    let mut runs = Vec::new();
-
-    // spawn tasks to pull builds
-    for sj in project.jobs {
-        let job: Arc<_> = match blocklist.contains(&sj.name) {
-            false => sj.as_job().upsert(db, ())?.into(),
-            true => continue,
-        };
-        let (build, mut mbs): (Arc<_>, _) = match sj.last_build {
-            Some(build @ SparseBuild { runs: Some(_), .. }) => (
-                build.as_build(job.id).upsert(db, ())?.into(),
-                build
-                    .runs
-                    .into_iter()
-                    .flatten()
-                    .filter(move |mb| mb.number == build.number),
-            ),
-            _ => {
-                info!("Job '{}' has no builds.", job.name);
-                continue;
-            }
-        };
-
-        mbs.try_for_each(|mb| match Run::select_one_by_url(db, &mb.url, ()) {
-            Ok(run) => {
-                runs.push(run);
-                Ok(())
-            } // cached
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                let jenkins = jenkins.clone();
-                let artifacts = artifacts.clone();
-                let job = job.clone();
-                let build = build.clone();
-                handles.spawn(async move {
-                    let full_build = mb.get_full_build(&jenkins).await.unwrap();
-                    let run = full_build.as_run(build.id, &jenkins).await;
-
-                    let mut blobs = Vec::new();
-                    for a in &full_build.artifacts {
-                        if let Some((_, c)) = artifacts
-                            .iter()
-                            .find(|(re, _)| re.is_match(&a.relative_path))
-                            && let Ok(blob) = full_build.get_artifact(&jenkins, a).await
-                        {
-                            let blob = if let Some(mut iter) =
-                                c.post_process.as_ref().map(|argv| argv.iter())
-                                && let Some(program) = iter.next()
-                            {
-                                spawn_process(program, iter, &run.display_name, &run.url, &blob)
-                                    .await
-                                    .unwrap()
-                            } else {
-                                blob.to_vec()
-                            };
-
-                            blobs.push((a.relative_path.clone(), blob));
-                        }
-                    }
-
-                    log!(
-                        match run.status {
-                            Some(
-                                BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted,
-                            ) => Level::Warn,
-                            _ => Level::Info,
-                        },
-                        "Job '{}#{}' run '{}' finished with status {:?}.",
-                        job.name,
-                        build.number,
-                        run.display_name,
-                        run.status
-                    );
-
-                    (run, blobs)
-                });
-
-                Ok(())
-            }
-            Err(e) => Err(Error::from(e)),
-        })?;
+    // Context struct to move around to each task
+    struct Context {
+        artifacts: Arc<[(Regex, ConfigArtifact)]>,
+        jenkins: Arc<Jenkins>,
+        job: Arc<InDatabase<Job>>,
+        build: Arc<InDatabase<JobBuild>>,
+        mb: ShortBuild,
     }
 
+    // https://morestina.net/1607/fallible-iteration
+    let err: Cell<Result<()>> = Cell::new(Ok(()));
+    fn until_err<T, E>(err: &mut &Cell<Result<(), E>>, res: Result<T, E>) -> Option<T> {
+        res.map_err(|e| err.set(Err(e))).ok()
+    }
+
+    // spawn tasks to pull builds
+    let mut runs = Vec::new();
+    let mut handles: JoinSet<_> = project
+        .jobs
+        .into_iter()
+        .filter(|sj| {
+            !blocklist.contains(&sj.name)
+                && sj
+                    .builds
+                    .is_empty()
+                    .then(|| info!("Job '{}' has no builds.", &sj.name))
+                    .is_none()
+        })
+        .map(|sj| {
+            let job: Arc<_> = sj.as_job().upsert(db, ())?.into();
+            Ok(sj
+                .builds
+                .into_iter()
+                .map(move |sb| (job.clone(), sb))
+                .take(last_n_history))
+        })
+        .scan(&err, until_err)
+        .flatten()
+        .map(|(job, sb)| {
+            let artifacts = artifacts.clone();
+            let jenkins = jenkins.clone();
+            let build: Arc<_> = sb.as_build(job.id).upsert(db, ())?.into();
+            Ok(sb
+                .runs
+                .into_iter()
+                .flatten()
+                .filter(move |mb| mb.number == sb.number)
+                .map(move |mb| Context {
+                    artifacts: artifacts.clone(),
+                    jenkins: jenkins.clone(),
+                    job: job.clone(),
+                    build: build.clone(),
+                    mb,
+                }))
+        })
+        .scan(&err, until_err)
+        .flatten()
+        .filter_map(|ctx| match Run::select_one_by_url(db, &ctx.mb.url, ()) {
+            Ok(run) => {
+                runs.push(run);
+                None
+            } // cached
+            Err(rusqlite::Error::QueryReturnedNoRows) => Some(Ok(ctx)),
+            Err(e) => Some(Err(Error::from(e))),
+        })
+        .scan(&err, until_err)
+        .map(
+            |Context {
+                 artifacts,
+                 jenkins,
+                 job,
+                 build,
+                 mb,
+             }| async move {
+                let full_build: Arc<_> = mb.get_full_build(&jenkins).await.unwrap().into();
+                let run = full_build.as_run(build.id, &jenkins).await;
+
+                let artifacts = artifacts.clone();
+                let display_name = run.display_name.clone();
+                let url = run.url.clone();
+                let artifacts: JoinSet<_> = full_build
+                    .clone()
+                    .artifacts
+                    .iter()
+                    .filter_map(move |artifact| {
+                        let jenkins = jenkins.clone();
+                        let full_build = full_build.clone();
+                        let artifact = artifact.clone();
+                        let display_name = display_name.clone();
+                        let url = url.clone();
+                        artifacts
+                            .iter()
+                            .find(|(re, _)| re.is_match(&artifact.relative_path))
+                            .map(move |(_, c)| {
+                                let post_process = c.post_process.clone();
+                                async move {
+                                    let blob = full_build
+                                        .get_artifact(&jenkins, &artifact)
+                                        .await
+                                        .inspect_err(|e| {
+                                            log::error!(
+                                                "Failed to retrieve artifact for run {}: {}",
+                                                &display_name,
+                                                e
+                                            )
+                                        })
+                                        .ok()?;
+
+                                    let contents = if let Some(mut iter) =
+                                        post_process.as_ref().map(|argv| argv.iter())
+                                        && let Some(program) = iter.next()
+                                    {
+                                        spawn_process(program, iter, &display_name, &url, &blob)
+                                            .await
+                                            .unwrap()
+                                    } else {
+                                        blob.to_vec()
+                                    };
+
+                                    Some(|run_id| Artifact {
+                                        path: artifact.relative_path,
+                                        contents,
+                                        run_id,
+                                    })
+                                }
+                            })
+                    })
+                    .collect();
+
+                log!(
+                    match run.status {
+                        Some(
+                            BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted,
+                        ) => Level::Warn,
+                        _ => Level::Info,
+                    },
+                    "Job '{}#{}' run '{}' finished with status {:?}.",
+                    job.name,
+                    build.number,
+                    run.display_name,
+                    run.status
+                );
+
+                (run, artifacts)
+            },
+        )
+        .collect();
+
+    err.into_inner()?; // check for failures before continuing
     runs.reserve(handles.len());
 
     // collect them all here
     while let Some(h) = handles.join_next().await {
-        let (run, blobs) = h?;
+        let (run, mut artifacts) = h?;
         let run = run.upsert(db, ())?;
-        blobs.into_iter().try_for_each(|(p, b)| {
-            Artifact {
-                path: p,
-                contents: b,
-                run_id: run.id,
-            }
-            .insert(db, ())?;
 
-            Ok::<_, Error>(())
-        })?;
+        while let Some(artifact) = artifacts.join_next().await {
+            if let Ok(Some(artifact)) = artifact {
+                artifact(run.id).insert(db, ())?;
+            }
+        }
 
         runs.push(run);
     }
@@ -447,6 +511,7 @@ async fn main() -> Result<()> {
         blocklist,
         database,
         jenkins_url,
+        last_n_history,
         password,
         project,
         tag,
@@ -509,6 +574,7 @@ async fn main() -> Result<()> {
         project,
         artifact.clone(),
         &blocklist,
+        last_n_history,
         jenkins.into(),
         &database,
     )
