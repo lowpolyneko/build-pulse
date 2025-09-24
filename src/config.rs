@@ -21,6 +21,9 @@ pub struct Config {
     /// Optional password
     pub password: Option<String>,
 
+    /// Last N builds to preserve for history
+    pub last_n_history: usize,
+
     /// Threshold for similarity calculation
     pub threshold: f32,
 
