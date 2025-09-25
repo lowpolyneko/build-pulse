@@ -634,7 +634,7 @@ async fn main() -> Result<()> {
 
         copy_artifacts("artifacts", artifact, &database).await?;
 
-        let markup = task::spawn_blocking(move || {
+        let markup = task::spawn(async move {
             page::render(
                 &database,
                 &view,
@@ -642,16 +642,15 @@ async fn main() -> Result<()> {
             )
             .unwrap()
             .into_string()
-        })
-        .await?;
+        });
 
         if let Some(filepath) = output {
-            fs::write(&filepath, markup).await?;
+            fs::write(&filepath, markup.await?).await?;
 
             info!("Written to {filepath}");
         } else {
             info!("Dumping to stdout --");
-            println!("{markup}");
+            println!("{}", markup.await?);
         }
     }
 
