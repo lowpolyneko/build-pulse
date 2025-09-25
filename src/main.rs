@@ -290,7 +290,6 @@ async fn parse_unprocessed_runs(
     tags: Arc<TagSet<InDatabase<Tag>>>,
     db: &Database,
 ) -> Result<Vec<InDatabase<Issue>>> {
-    let mut handles = JoinSet::new();
     let mut inserted_issues = Vec::new();
 
     enum Dependent {
@@ -298,64 +297,70 @@ async fn parse_unprocessed_runs(
         Artifact(Issue, Arc<InDatabase<Artifact>>),
     }
 
-    runs.into_iter().for_each(|run| match run.tag_schema {
-        None => {
-            let tags = tags.clone();
-            let artifacts = Artifact::select_all_by_run(db, run.id, ());
-            handles.spawn_blocking(move || -> (_, Vec<_>) {
-                let issues = {
-                    let warn = |t: &InDatabase<Tag>| match t.severity {
-                        Severity::Metadata => {}
-                        _ => warn!(
-                            "Found issue(s) tagged '{}' in run '{}'",
-                            t.name, run.display_name
-                        ),
-                    };
-                    let run_name = tags
-                        .grep_tags(run.display_name.clone(), Field::RunName)
-                        .flat_map(|t| t.grep_issue(run.display_name.clone()))
-                        .map(Dependent::Run);
-                    let console = run
-                        .log
-                        .iter()
-                        .flat_map(|l| {
-                            tags.grep_tags(l.clone(), Field::Console).flat_map(|t| {
-                                warn(t);
-                                t.grep_issue(l.clone())
-                            })
-                        })
-                        .map(Dependent::Run);
-                    let artifact = artifacts
-                        .into_iter()
-                        .flatten()
-                        .map(|a| a.into())
-                        .filter_map(|a: Arc<_>| {
-                            from_utf8(&a.contents)
-                                .ok()
-                                .map(|b| -> arcstr::ArcStr { b.into() })
-                                .map(|blob| {
-                                    tags.grep_tags(blob.clone(), Field::Artifact)
-                                        .flat_map(move |t| {
-                                            warn(t);
-                                            t.grep_issue(blob.clone())
-                                        })
-                                        .map(move |i| Dependent::Artifact(i, a.clone()))
+    let mut handles: JoinSet<_> = runs
+        .into_iter()
+        .filter_map(|run| match run.tag_schema {
+            None => {
+                let tags = tags.clone();
+                let artifacts = Artifact::select_all_by_run(db, run.id, ());
+                Some(async move {
+                    let issues: Vec<_> = {
+                        let warn = |t: &InDatabase<Tag>| match t.severity {
+                            Severity::Metadata => {}
+                            _ => warn!(
+                                "Found issue(s) tagged '{}' in run '{}'",
+                                t.name, run.display_name
+                            ),
+                        };
+                        let run_name = tags
+                            .grep_tags(run.display_name.clone(), Field::RunName)
+                            .flat_map(|t| t.grep_issue(run.display_name.clone()))
+                            .map(Dependent::Run);
+                        let console = run
+                            .log
+                            .iter()
+                            .flat_map(|l| {
+                                tags.grep_tags(l.clone(), Field::Console).flat_map(|t| {
+                                    warn(t);
+                                    t.grep_issue(l.clone())
                                 })
-                        })
-                        .flatten();
+                            })
+                            .map(Dependent::Run);
+                        let artifact = artifacts
+                            .into_iter()
+                            .flatten()
+                            .map(|a| a.into())
+                            .filter_map(|a: Arc<_>| {
+                                from_utf8(&a.contents)
+                                    .ok()
+                                    .map(|b| -> arcstr::ArcStr { b.into() })
+                                    .map(|blob| {
+                                        tags.grep_tags(blob.clone(), Field::Artifact)
+                                            .flat_map(move |t| {
+                                                warn(t);
+                                                t.grep_issue(blob.clone())
+                                            })
+                                            .map(move |i| Dependent::Artifact(i, a.clone()))
+                                    })
+                            })
+                            .flatten();
 
-                    run_name.chain(console).chain(artifact).collect()
-                };
+                        run_name.chain(console).chain(artifact).collect()
+                    };
 
-                (run, issues)
-            });
-        }
-        _ => inserted_issues.extend(
-            Issue::select_all_not_metadata(db, (db, &run))
-                .into_iter()
-                .flatten(),
-        ),
-    });
+                    (run, issues)
+                })
+            }
+            _ => {
+                inserted_issues.extend(
+                    Issue::select_all_not_metadata(db, (db, &run))
+                        .into_iter()
+                        .flatten(),
+                );
+                None
+            }
+        })
+        .collect();
 
     while let Some(h) = handles.join_next().await {
         let (run, issues) = h?;
