@@ -400,14 +400,16 @@ async fn calculate_similarities(
             .map(|(i, g)| {
                 let issue = issue.clone();
                 async move {
-                    let mut inner = JoinSet::new();
-                    g.into_iter().for_each(|issue2| {
-                        let issue = issue.clone();
-                        inner.spawn_blocking(move || {
-                            normalized_levenshtein_distance(&issue.snippet, &issue2.snippet)
-                                > threshold
-                        });
-                    });
+                    let mut inner: JoinSet<_> = g
+                        .into_iter()
+                        .map(|issue2| {
+                            let issue = issue.clone();
+                            async move {
+                                normalized_levenshtein_distance(&issue.snippet, &issue2.snippet)
+                                    > threshold
+                            }
+                        })
+                        .collect();
 
                     loop {
                         match inner.join_next().await {
@@ -438,16 +440,16 @@ async fn calculate_similarities(
     }
 
     // sort resultant groups
-    let mut handles = JoinSet::new();
-    for mut g in groups {
-        handles.spawn_blocking(|| {
+    let mut handles: JoinSet<_> = groups
+        .into_iter()
+        .map(|mut g| async {
             g.sort();
 
             let mut hasher = DefaultHasher::new();
             g.hash(&mut hasher);
             (hasher.finish(), g)
-        });
-    }
+        })
+        .collect();
 
     // store relations in database
     while let Some(h) = handles.join_next().await {
