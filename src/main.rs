@@ -143,7 +143,7 @@ async fn pull_build_logs(
                     .is_none()
         })
         .map(|sj| {
-            let job: Arc<_> = sj.as_job().upsert(db, ())?.into();
+            let job: Arc<_> = sj.as_job(last_n_history).upsert(db, ())?.into();
             Ok(sj
                 .builds
                 .into_iter()

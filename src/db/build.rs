@@ -114,32 +114,32 @@ impl JobBuild {
                 JOIN runs ON runs.id = issues.run_id
                 JOIN builds ON builds.id = runs.build_id
                 JOIN jobs ON jobs.id = builds.job_id
-                WHERE number != last_build
+                WHERE number < last_build
             );
             DELETE FROM issues WHERE id IN (
                 SELECT issues.id FROM issues
                 JOIN runs ON runs.id = issues.run_id
                 JOIN builds ON builds.id = runs.build_id
                 JOIN jobs ON jobs.id = builds.job_id
-                WHERE number != last_build
+                WHERE number < last_build
             );
             DELETE FROM artifacts WHERE id IN (
                 SELECT artifacts.id FROM artifacts
                 JOIN runs ON runs.id = artifacts.run_id
                 JOIN builds ON builds.id = runs.build_id
                 JOIN jobs ON jobs.id = builds.job_id
-                WHERE number != last_build
+                WHERE number < last_build
             );
             DELETE FROM runs WHERE id IN (
                 SELECT runs.id FROM runs
                 JOIN builds ON builds.id = runs.build_id
                 JOIN jobs ON jobs.id = builds.job_id
-                WHERE number != last_build
+                WHERE number < last_build
             );
             DELETE FROM builds WHERE id IN (
                 SELECT builds.id FROM builds
                 JOIN jobs ON jobs.id = builds.job_id
-                WHERE number != last_build
+                WHERE number < last_build
             );
             COMMIT;
             ",
