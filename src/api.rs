@@ -66,7 +66,7 @@ pub trait AsBuild {
 /// Jobs that can be represented as [Job]
 pub trait AsJob {
     /// Convert `&self` to [Job]
-    fn as_job(&self) -> crate::db::Job;
+    fn as_job(&self, last_n: usize) -> crate::db::Job;
 }
 
 /// [Build]s with common fields
@@ -107,10 +107,10 @@ impl Job for SparseJob {
 }
 
 impl AsJob for SparseJob {
-    fn as_job(&self) -> crate::db::Job {
+    fn as_job(&self, last_n: usize) -> crate::db::Job {
         crate::db::Job {
             name: self.name.clone(),
-            last_build: self.builds.first().map(|b| b.number),
+            last_build: self.builds.iter().take(last_n).last().map(|b| b.number),
             url: self.url.clone(),
         }
     }
