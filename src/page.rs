@@ -351,15 +351,14 @@ fn render_stats(db: &Database) -> Result<Markup> {
 
 /// Render [crate::db::Similarity]
 fn render_similarities(db: &Database) -> Result<Markup> {
-    let similarities: HashMap<_, Vec<_>> = Similarity::query_all(db, ())?
-        .into_iter()
-        // ignore similarities within the same run
-        .filter(|s| s.related.len() > 1)
-        .fold(HashMap::new(), |mut acc, s| {
-            acc.entry(s.tag.severity).or_default().push(s);
+    let similarities: HashMap<_, Vec<_>> =
+        Similarity::query_all(db, ())?
+            .into_iter()
+            .fold(HashMap::new(), |mut acc, s| {
+                acc.entry(s.tag.severity).or_default().push(s);
 
-            acc
-        });
+                acc
+            });
 
     Ok(html! {
         h4 {

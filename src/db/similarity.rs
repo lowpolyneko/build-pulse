@@ -54,14 +54,25 @@ impl Similarity {
         let mut hm: HashMap<u64, Self> = HashMap::new();
         db.prepare_cached(
             "
-                SELECT DISTINCT
-                    similarity_hash,
-                    tag_id,
-                    run_id,
-                    issue_id
-                FROM similarities
-                JOIN issues ON issues.id = similarities.issue_id
-                ",
+            SELECT DISTINCT
+                s.similarity_hash,
+                i.tag_id,
+                i.run_id,
+                s.issue_id
+            FROM similarities s
+            JOIN issues i ON i.id = s.issue_id
+            WHERE EXISTS (
+                    SELECT 1 FROM similarities
+                    JOIN issues ON issues.id = similarities.issue_id
+                    JOIN runs ON runs.id = issues.run_id
+                    WHERE similarity_hash = s.similarity_hash
+                        AND build_id IN (
+                                SELECT id FROM builds
+                                GROUP BY job_id
+                                HAVING MAX(number)
+                            )
+                )
+            ",
         )?
         .query_map((), |row| {
             Ok((
@@ -94,7 +105,12 @@ impl Similarity {
             Ok::<_, rusqlite::Error>(())
         })?;
 
-        let mut similarities: Vec<_> = hm.into_values().collect();
+        let mut similarities: Vec<_> = hm
+            .into_values()
+            // ignore similarities within the same run
+            .filter(|s| s.related.len() > 1)
+            .collect();
+
         similarities.sort_by_cached_key(|s| Reverse(s.related.len()));
 
         Ok(similarities)
