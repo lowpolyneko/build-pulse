@@ -156,7 +156,7 @@ macro_rules! for_all {
     };
 
     ($($method:tt)+) => {
-        for_all!([Artifact, Job, JobBuild, Run, Issue, TagInfo, SimilarityInfo] => $($method)+)
+        for_all!([SimilarityInfo, Issue, Artifact, Run, JobBuild, Job, TagInfo] => $($method)+)
     };
 }
 
