@@ -183,9 +183,13 @@ impl TagExpr {
         Ok((
             format!(
                 "
-                SELECT DISTINCT runs.id FROM runs
-                WHERE
-                {where_expr}
+                SELECT DISTINCT id FROM runs
+                WHERE {where_expr}
+                    AND build_id IN (
+                        SELECT id FROM builds
+                        GROUP BY job_id
+                        HAVING MAX(number)
+                    )
                 "
             ),
             params_from_iter(params),
