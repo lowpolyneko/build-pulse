@@ -36,10 +36,19 @@ pub struct Statistics {
 impl Statistics {
     /// Gets [super::Database]'s [Statistics]
     pub fn query(db: &super::Database) -> rusqlite::Result<Self> {
-        // calculate success/failures for all runs
+        // calculate success/failures for latest runs
         let mut stats = db
             .conn
-            .prepare("SELECT status, id FROM runs")?
+            .prepare(
+                "
+                SELECT status, id FROM runs
+                WHERE build_id IN (
+                        SELECT id FROM builds
+                        GROUP BY job_id
+                        HAVING MAX(number)
+                    )
+                ",
+            )?
             .query_map((), |row| Ok((read_value!(row, 0), row.get(1)?)))?
             .try_fold(Statistics::default(), |mut stats, res| {
                 let (status, id) = res?;
@@ -59,12 +68,12 @@ impl Statistics {
             .conn
             .prepare(
                 "
-                SELECT COUNT(*) FROM jobs j
-                WHERE EXISTS (
-                    SELECT 1 FROM builds
-                    WHERE builds.job_id = j.id
-                    AND status = ?
-                )
+                SELECT COUNT(*) FROM jobs
+                WHERE id IN (
+                        SELECT job_id FROM builds
+                        GROUP BY job_id
+                        HAVING MAX(number) AND status = ?
+                    )
                 ",
             )?
             .query_one((write_value!(BuildStatus::Success),), |row| row.get(0))?;
@@ -81,7 +90,12 @@ impl Statistics {
                 "
                 SELECT COUNT(*) FROM issues
                 JOIN tags ON tags.id = issues.tag_id
-                WHERE tags.severity != ?
+                JOIN runs ON runs.id = issues.run_id
+                WHERE tags.severity != ? AND runs.build_id IN (
+                        SELECT id FROM builds
+                        GROUP BY job_id
+                        HAVING MAX(number)
+                    )
                 ",
             )?
             .query_one((write_value!(Severity::Metadata),), |row| row.get(0))?;
@@ -95,6 +109,10 @@ impl Statistics {
                         r.status = ?
                         OR r.status = ?
                         OR r.status = ?
+                    ) AND r.build_id IN (
+                        SELECT id FROM builds
+                        GROUP BY job_id
+                        HAVING MAX(number)
                     ) AND NOT EXISTS (
                         SELECT 1 FROM issues
                         JOIN tags ON tags.id = issues.tag_id
