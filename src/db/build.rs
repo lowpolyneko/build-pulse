@@ -103,6 +103,22 @@ impl JobBuild {
         .query_one((job_id, number), Self::map_row(params))
     }
 
+    /// Get all [JobBuild] from [super::Database] by [super::Job]
+    pub fn select_all_by_job(
+        db: &super::Database,
+        job_id: i64,
+        params: (),
+    ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
+        db.prepare_cached(
+            "
+                SELECT * FROM builds
+                WHERE job_id = ?
+                ",
+        )?
+        .query_map((job_id,), Self::map_row(params))?
+        .collect()
+    }
+
     /// Remove all [JobBuild]s which aren't referenced by [super::Job] from [super::Database]
     pub fn delete_all_orphan(db: &super::Database) -> rusqlite::Result<()> {
         db.execute_batch(

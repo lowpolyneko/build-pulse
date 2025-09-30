@@ -65,38 +65,51 @@ fn severity_as_class(severity: Severity) -> Option<&'static str> {
 
 /// Render a [crate::api::SparseJob]
 fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Markup> {
-    let last_build = match job.last_build {
-        Some(n) => Some(JobBuild::select_one_by_job(db, job.id, n, ())?),
-        None => None,
-    };
-    let sorted_runs = match &last_build {
-        Some(b) => {
-            let mut sr = Run::select_all_by_build(db, b, ())?;
-            sr.sort_by_cached_key(|r| match r.status {
-                Some(BuildStatus::Failure) => 0,
-                Some(BuildStatus::Unstable) => 1,
-                Some(BuildStatus::Aborted) => 2,
-                Some(BuildStatus::Success) => 3,
-                Some(BuildStatus::NotBuilt) => 4,
-                None => 4,
-            });
-
-            Some(sr)
-        }
-        None => None,
-    };
-
     Ok(html! {
         h2 {
             a href=(job.url) {
                 (job.name)
             }
         }
-        @if let Some(build) = last_build {
+        @if let Some((last_build, rest)) = JobBuild::select_all_by_job(db, job.id, ())?.split_first() {
+            (render_build(&last_build, db, tz, true)?)
+            @for build in rest {
+                (render_build(&build, db, tz, false)?)
+            }
+        } @else {
             p {
-                "Last build: "
+                "No builds available."
+            }
+        }
+    })
+}
+
+/// Render a [JobBuild]
+fn render_build(
+    build: &InDatabase<JobBuild>,
+    db: &Database,
+    tz: UtcOffset,
+    latest: bool,
+) -> Result<Markup> {
+    let mut runs = Run::select_all_by_build(db, &build, ())?;
+    runs.sort_by_cached_key(|r| match r.status {
+        Some(BuildStatus::Failure) => 0,
+        Some(BuildStatus::Unstable) => 1,
+        Some(BuildStatus::Aborted) => 2,
+        Some(BuildStatus::Success) => 3,
+        Some(BuildStatus::NotBuilt) => 4,
+        None => 4,
+    });
+    Ok(html! {
+        details open[latest && matches!(build.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
+            summary {
+                @if latest {
+                    b {
+                        "Latest: "
+                    }
+                }
                 a href=(build.url) {
-                    "#"
+                    "Build #"
                     (build.number)
                 }
                 " on "
@@ -113,20 +126,9 @@ fn render_job(job: &InDatabase<Job>, db: &Database, tz: UtcOffset) -> Result<Mar
                     (status_as_str(build.status))
                 }
             }
-            @if let Some(runs) = sorted_runs {
-                details open[matches!(build.status, Some(BuildStatus::Failure | BuildStatus::Unstable | BuildStatus::Aborted))] {
-                    summary {
-                        "Run Information"
-                    }
-                    @for run in runs {
-                        (render_run(&run, db)?)
-                        br;
-                    }
-                }
-            }
-        } @else {
-            p {
-                "No builds available."
+            @for run in runs {
+                (render_run(&run, db)?)
+                br;
             }
         }
     })
