@@ -244,7 +244,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
     let stats = Statistics::query(db)?;
     Ok(html! {
         h3 {
-            "Run Statistics"
+            "Job Statistics"
         }
         p {
             "Overall Job Health:"
@@ -257,7 +257,7 @@ fn render_stats(db: &Database) -> Result<Markup> {
         }
 
         h4 {
-            "Run Status"
+            "Latest Run Statuses"
         }
         table class="view" {
             tr {
@@ -486,7 +486,7 @@ pub fn render(db: &Database, views: &[TagView], tz: UtcOffset) -> Result<Markup>
             }
             body {
                 h1 {
-                    "Job Status"
+                    "build-pulse"
                 }
                 (render_stats(db)?)
                 (render_similarities(db)?)
