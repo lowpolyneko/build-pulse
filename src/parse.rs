@@ -6,11 +6,12 @@ use std::{
 };
 
 use arcstr::ArcStr;
+use futures::{StreamExt, TryStreamExt, stream};
 use regex::{Regex, RegexSet};
 
 use crate::{
     config::{ConfigTag, Field, Severity},
-    db::{InDatabase, Issue},
+    db::{Database, InDatabase, Issue, TagInfo, Upsertable},
 };
 
 /// Set of [Tag]s
@@ -86,6 +87,18 @@ impl TagSet<Tag> {
 
         Ok(Self { tags, match_set })
     }
+
+    /// Upsert a [TagSet] into [Database]
+    pub async fn upsert_tag_set(self, db: &Database) -> rusqlite::Result<TagSet<InDatabase<Tag>>> {
+        stream::iter(self.tags)
+            .then(|t| async { TagInfo::from(&t).upsert(db).await.map(|ti| ti.into_tag(t)) })
+            .try_collect()
+            .await
+            .map(|tags| TagSet {
+                tags,
+                match_set: self.match_set,
+            })
+    }
 }
 
 impl<T> TagSet<T>
@@ -107,23 +120,6 @@ where
         let mut s = DefaultHasher::new();
         self.hash(&mut s);
         s.finish()
-    }
-}
-
-impl<T> TagSet<T> {
-    /// Try to mutate tags in-place from `T` -> `U`
-    pub fn try_swap_tags<F, U, E>(self, f: F) -> Result<TagSet<U>, E>
-    where
-        F: FnMut(T) -> Result<U, E>,
-    {
-        Ok(TagSet {
-            tags: self
-                .tags
-                .into_iter()
-                .map(f)
-                .collect::<Result<Vec<_>, _>>()?,
-            match_set: self.match_set,
-        })
     }
 }
 
