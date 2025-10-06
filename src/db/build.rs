@@ -65,19 +65,19 @@ impl Upsertable for JobBuild {
     fn upsert(self, db: &super::Database, params: ()) -> rusqlite::Result<super::InDatabase<Self>> {
         db.prepare_cached(
             "
-                INSERT INTO builds (
-                    url,
-                    status,
-                    number,
-                    timestamp,
-                    job_id
-                ) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(url) DO UPDATE SET
-                        status = excluded.status,
-                        number = excluded.number,
-                        timestamp = excluded.timestamp,
-                        job_id = excluded.job_id
-                ",
+            INSERT INTO builds (
+                url,
+                status,
+                number,
+                timestamp,
+                job_id
+            ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(url) DO UPDATE SET
+                    status = excluded.status,
+                    number = excluded.number,
+                    timestamp = excluded.timestamp,
+                    job_id = excluded.job_id
+            ",
         )?
         .execute(self.as_params(params)?)?;
 
@@ -95,10 +95,11 @@ impl JobBuild {
     ) -> rusqlite::Result<super::InDatabase<Self>> {
         db.prepare_cached(
             "
-                SELECT * FROM builds
-                WHERE job_id = ?
-                AND number = ?
-                ",
+            SELECT * FROM builds
+            WHERE job_id = ?
+            AND number = ?
+            ORDER BY number DESC
+            ",
         )?
         .query_one((job_id, number), Self::map_row(params))
     }
@@ -111,9 +112,10 @@ impl JobBuild {
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
         db.prepare_cached(
             "
-                SELECT * FROM builds
-                WHERE job_id = ?
-                ",
+            SELECT * FROM builds
+            WHERE job_id = ?
+            ORDER BY number DESC
+            ",
         )?
         .query_map((job_id,), Self::map_row(params))?
         .collect()
