@@ -34,7 +34,7 @@ schema! {
     }
 }
 
-impl Queryable<'_> for JobBuild {
+impl Queryable for JobBuild {
     fn map_row(row: &rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         Ok(super::InDatabase::new(
             row.get(0)?,
@@ -59,7 +59,7 @@ impl Queryable<'_> for JobBuild {
     }
 }
 
-impl Upsertable<'_> for JobBuild {
+impl Upsertable for JobBuild {
     async fn upsert(self, db: &super::Database) -> rusqlite::Result<super::InDatabase<Self>> {
         let number = self.number;
         let job_id = self.job_id;

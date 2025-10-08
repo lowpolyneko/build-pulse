@@ -40,7 +40,7 @@ schema! {
     }
 }
 
-impl Queryable<'_> for IssueInfo {
+impl Queryable for IssueInfo {
     fn map_row(row: &rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         Ok(super::InDatabase::new(
             row.get(0)?,

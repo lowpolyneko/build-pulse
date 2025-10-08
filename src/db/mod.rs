@@ -321,7 +321,10 @@ pub trait Schema: Send + Sized {
     }
 }
 
-pub trait Queryable<'a>: Schema {
+pub trait Queryable: Schema
+where
+    Self: 'static,
+{
     /// Convert [Row] to `Self` with params
     fn map_row(row: &Row) -> Result<InDatabase<Self>>;
 
@@ -340,7 +343,7 @@ pub trait Queryable<'a>: Schema {
 
     /// Select one of `Self` from [Database] by `id`
     async fn select_one(db: &Database, id: i64) -> Result<InDatabase<Self>> {
-        db.call(|conn| {
+        db.call(move |conn| {
             conn.prepare_cached(Self::SELECT_ONE)?
                 .query_one((id,), Self::map_row)
         })
@@ -363,7 +366,7 @@ pub trait Queryable<'a>: Schema {
     }
 }
 
-pub trait Upsertable<'a>: Queryable<'a> {
+pub trait Upsertable: Queryable {
     /// Upsert `self` to [Database]
     async fn upsert(self, db: &Database) -> Result<InDatabase<Self>>;
 }

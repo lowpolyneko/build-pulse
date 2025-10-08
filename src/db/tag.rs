@@ -44,7 +44,7 @@ schema! {
     }
 }
 
-impl Queryable<'_> for TagInfo {
+impl Queryable for TagInfo {
     fn map_row(row: &rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         Ok(super::InDatabase::new(
             row.get(0)?,
@@ -67,7 +67,7 @@ impl Queryable<'_> for TagInfo {
     }
 }
 
-impl Upsertable<'_> for TagInfo {
+impl Upsertable for TagInfo {
     async fn upsert(self, db: &super::Database) -> rusqlite::Result<super::InDatabase<Self>> {
         let name = self.name.clone();
         db.call(move |conn| {

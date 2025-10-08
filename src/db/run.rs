@@ -41,7 +41,7 @@ schema! {
     }
 }
 
-impl Queryable<'_> for Run {
+impl Queryable for Run {
     fn map_row(row: &rusqlite::Row) -> rusqlite::Result<super::InDatabase<Self>> {
         Ok(super::InDatabase::new(
             row.get(0)?,
@@ -68,7 +68,7 @@ impl Queryable<'_> for Run {
     }
 }
 
-impl Upsertable<'_> for Run {
+impl Upsertable for Run {
     async fn upsert(self, db: &super::Database) -> rusqlite::Result<super::InDatabase<Self>> {
         let url = self.url.clone();
         db.call(move |conn| {

@@ -34,7 +34,7 @@ schema! {
     }
 }
 
-impl Queryable<'_> for SimilarityInfo {
+impl Queryable for SimilarityInfo {
     fn map_row(row: &rusqlite::Row) -> rusqlite::Result<InDatabase<Self>> {
         Ok(InDatabase::new(
             row.get(0)?,
