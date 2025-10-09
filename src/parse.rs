@@ -1,147 +1,118 @@
-//! [Tag] and [TagSet] parsing behavior.
+//! [Pattern] and [PatternSet] parsing behavior.
 use std::{
     collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
     ops::Deref,
 };
 
-use arcstr::ArcStr;
-use futures::{StreamExt, TryStreamExt, stream};
+use arcstr::{ArcStr, Substr};
 use regex::{Regex, RegexSet};
 
-use crate::{
-    config::{ConfigTag, Field, Severity},
-    db::{Database, InDatabase, Issue, TagInfo, Upsertable},
-};
+use crate::db::{InDatabase, Issue, TagInfo};
 
-/// Set of [Tag]s
-pub struct TagSet<T> {
-    /// [Vec] of underlying [Tag]s
-    tags: Vec<T>,
+/// Set of [Pattern]s
+pub struct PatternSet<T> {
+    /// [Vec] of underlying [Pattern]s
+    patterns: Vec<Pattern<T>>,
 
-    /// [RegexSet] matching [Tag]s
-    match_set: RegexSet,
+    /// [RegexSet] matching [Pattern]s
+    pattern_set: RegexSet,
 }
 
-/// [Tag] that can be parsed for [Issue]s
-pub struct Tag {
-    /// Unique name
-    pub name: String,
-
-    /// Description of [Tag]
-    pub desc: String,
-
-    /// [Regex] pattern to match for
+/// [Pattern] that can be searched for
+pub struct Pattern<T> {
+    /// [Regex] pattern to match
     regex: Regex,
 
-    /// [Field] to pattern match
-    pub from: Field,
-
-    /// [Severity] of [Tag]
-    pub severity: Severity,
+    /// Found item
+    item: T,
 }
 
-impl<T> Hash for TagSet<T>
-where
-    T: Deref<Target = Tag>,
-{
+impl<T: Hash> Hash for PatternSet<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.tags.iter().for_each(|t| t.hash(state));
+        self.patterns.hash(state);
     }
 }
 
-impl Hash for Tag {
+impl<T: Hash> Hash for Pattern<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
+        self.item.hash(state);
         self.regex.as_str().hash(state);
-        self.from.hash(state);
     }
 }
 
-impl<T> Deref for TagSet<T>
-where
-    T: Deref<Target = Tag>,
-{
-    type Target = Vec<T>;
+impl<T> Deref for Pattern<T> {
+    type Target = T;
+
     fn deref(&self) -> &Self::Target {
-        &self.tags
+        &self.item
     }
 }
 
-impl TagSet<Tag> {
-    /// Load an array of [ConfigTag] into a [TagSet]
-    pub fn from_config(config_tags: Vec<ConfigTag>) -> Result<Self, regex::Error> {
-        let match_set = RegexSet::new(config_tags.iter().map(|i| &i.pattern))?;
-        let tags = config_tags
+impl<T> PatternSet<T> {
+    /// Create a new [PatternSet] with `items` and a [Regex] map `f`
+    pub fn new<I, F, P>(items: I, mut f: F) -> Result<Self, <P as TryInto<Regex>>::Error>
+    where
+        I: IntoIterator<Item = T>,
+        F: FnMut(&T) -> P,
+        P: TryInto<Regex>,
+        <P as TryInto<Regex>>::Error: From<regex::Error>,
+    {
+        let patterns = items
             .into_iter()
-            .map(|i| {
-                Ok(Tag {
-                    name: i.name,
-                    desc: i.desc,
-                    regex: Regex::new(&i.pattern)?,
-                    from: i.from,
-                    severity: i.severity,
-                })
-            })
+            .map(|item| f(&item).try_into().map(|regex| Pattern { regex, item }))
             .collect::<Result<Vec<_>, _>>()?;
+        let pattern_set = RegexSet::new(patterns.iter().map(|m| m.regex.as_str()))?;
 
-        Ok(Self { tags, match_set })
+        Ok(Self {
+            patterns,
+            pattern_set,
+        })
     }
 
-    /// Upsert a [TagSet] into [Database]
-    pub async fn upsert_tag_set(self, db: &Database) -> rusqlite::Result<TagSet<InDatabase<Tag>>> {
-        stream::iter(self.tags)
-            .then(|t| async { TagInfo::from(&t).upsert(db).await.map(|ti| ti.into_tag(t)) })
-            .try_collect()
-            .await
-            .map(|tags| TagSet {
-                tags,
-                match_set: self.match_set,
-            })
-    }
-}
-
-impl<T> TagSet<T>
-where
-    T: Deref<Target = Tag>,
-{
-    /// Grep `field` for [Tag]s
-    pub fn grep_tags(&self, field: ArcStr, from: Field) -> impl Iterator<Item = &T> {
+    /// Grep `field` for [Pattern]s
+    pub fn grep_matches(&self, field: &ArcStr) -> impl Iterator<Item = &Pattern<T>> {
         // matches using the match set first, then the regex of all valid matches are ran again to find them
-        self.match_set
+        self.pattern_set
             .matches(&field)
             .into_iter()
-            .map(|i| &self.tags[i])
-            .filter(move |t| t.from == from)
+            .map(|i| &self.patterns[i])
     }
 
-    /// Get the [TagSet] schema/hash
-    pub fn schema(&self) -> u64 {
+    /// Get the [PatternSet] schema/hash
+    pub fn schema(&self) -> u64
+    where
+        Self: Hash,
+    {
         let mut s = DefaultHasher::new();
         self.hash(&mut s);
         s.finish()
     }
 }
 
-impl InDatabase<Tag> {
-    /// Grep `field` for [Issue]s
-    pub fn grep_issue(&self, field: ArcStr) -> impl Iterator<Item = Issue> {
-        let mut hm: HashMap<Issue, u64> = HashMap::new();
+impl<T> Pattern<T> {
+    /// Grep `field` for substrings
+    pub fn grep_substr(&self, field: &ArcStr) -> impl Iterator<Item = Substr> {
         self.regex
-            .find_iter(&field)
-            .map(|m| Issue {
-                snippet: field.substr_from(m.into()),
-                tag_id: self.id,
-                duplicates: 0,
-            })
-            .for_each(|i| {
-                hm.entry(i).and_modify(|e| *e += 1).or_insert(0);
-            });
+            .find_iter(field)
+            .map(move |m| field.substr(m.range()))
+    }
+}
 
-        hm.into_iter().map(|(mut i, d)| {
-            i.duplicates = d;
-            i
-        })
+impl Pattern<InDatabase<TagInfo>> {
+    /// Grep `field` for [Issue]s
+    pub fn grep_issue(&self, field: &ArcStr) -> impl Iterator<Item = Issue> {
+        self.grep_substr(&field)
+            .fold(HashMap::new(), |mut acc, m| {
+                *acc.entry(m).or_default() += 1;
+                acc
+            })
+            .into_iter()
+            .map(move |(snippet, duplicates)| Issue {
+                snippet,
+                tag_id: self.id,
+                duplicates,
+            })
     }
 }
 
