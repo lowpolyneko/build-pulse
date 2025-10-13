@@ -71,10 +71,10 @@ impl<T> PatternSet<T> {
     }
 
     /// Grep `field` for [Pattern]s
-    pub fn grep_matches(&self, field: &ArcStr) -> impl Iterator<Item = &Pattern<T>> {
+    pub fn grep_matches<S: AsRef<str>>(&self, field: S) -> impl Iterator<Item = &Pattern<T>> {
         // matches using the match set first, then the regex of all valid matches are ran again to find them
         self.pattern_set
-            .matches(&field)
+            .matches(field.as_ref())
             .into_iter()
             .map(|i| &self.patterns[i])
     }
