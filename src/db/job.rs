@@ -7,6 +7,7 @@ use crate::{
 };
 
 /// [Job] stored in [super::Database]
+#[derive(Clone)]
 pub struct Job {
     /// Unique name of [Job]
     pub name: ArcStr,

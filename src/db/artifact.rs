@@ -2,7 +2,7 @@ use crate::{db::Queryable, schema};
 
 /// [Artifact] stored in [super::Database]
 pub struct Artifact {
-    /// Byte contents of [Artifact]
+    /// Path of the [Artifact]
     pub path: String,
 
     /// Byte contents of [Artifact]

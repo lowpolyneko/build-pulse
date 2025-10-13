@@ -6,6 +6,7 @@ use crate::{
 };
 
 /// [JobBuild] in [super::Database]
+#[derive(Clone)]
 pub struct JobBuild {
     /// Build url
     pub url: String,

@@ -3,7 +3,6 @@ use arcstr::ArcStr;
 use crate::{
     config::{Field, Severity},
     db::{Queryable, Run, Upsertable},
-    parse::Tag,
     read_value, schema, write_value,
 };
 
@@ -20,18 +19,6 @@ pub struct TagInfo {
 
     /// Severity of [Tag]
     pub severity: Severity,
-}
-
-impl From<&Tag> for TagInfo {
-    fn from(value: &Tag) -> Self {
-        TagInfo {
-            // FIXME: make [Tag]'s name and desc also be ArcStr
-            name: ArcStr::from(&value.name),
-            desc: ArcStr::from(&value.desc),
-            field: value.from,
-            severity: value.severity,
-        }
-    }
 }
 
 schema! {

@@ -74,50 +74,48 @@ impl IssueInfo {
         run: &super::InDatabase<Run>,
         include_metadata: bool,
     ) -> rusqlite::Result<Vec<super::InDatabase<Self>>> {
-        match include_metadata {
-            true => {
-                db.call(|conn| {
-                    conn.prepare_cached(
-                        "
-                        SELECT
-                            issues.id,
-                            snippet_start,
-                            snippet_end,
-                            run_id,
-                            artifact_id,
-                            tag_id,
-                            duplicates
-                        FROM issues
-                        WHERE issues.run_id = ?
-                        ",
-                    )?
-                    .query_map((run.id,), Self::map_row)?
-                    .collect()
-                })
-                .await
-            }
-            false => {
-                db.call(|conn| {
-                    conn.prepare_cached(
-                        "
-                        SELECT
-                            issues.id,
-                            snippet_start,
-                            snippet_end,
-                            run_id,
-                            artifact_id,
-                            tag_id,
-                            duplicates
-                        FROM issues
-                        WHERE issues.run_id = ?
-                        AND tags.severity != ?
-                        ",
-                    )?
-                    .query_map((run.id, write_value!(Severity::Metadata)), Self::map_row)?
-                    .collect()
-                })
-                .await
-            }
+        let id = run.id;
+        if include_metadata {
+            db.call(move |conn| {
+                conn.prepare_cached(
+                    "
+                    SELECT
+                        issues.id,
+                        snippet_start,
+                        snippet_end,
+                        run_id,
+                        artifact_id,
+                        tag_id,
+                        duplicates
+                    FROM issues
+                    WHERE issues.run_id = ?
+                    ",
+                )?
+                .query_map((id,), Self::map_row)?
+                .collect()
+            })
+            .await
+        } else {
+            db.call(move |conn| {
+                conn.prepare_cached(
+                    "
+                    SELECT
+                        issues.id,
+                        snippet_start,
+                        snippet_end,
+                        run_id,
+                        artifact_id,
+                        tag_id,
+                        duplicates
+                    FROM issues
+                    WHERE issues.run_id = ?
+                    AND tags.severity != ?
+                    ",
+                )?
+                .query_map((id, write_value!(Severity::Metadata)), Self::map_row)?
+                .collect()
+            })
+            .await
         }
     }
 

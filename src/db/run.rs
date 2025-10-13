@@ -9,6 +9,7 @@ use crate::{
 };
 
 /// [Run] stored in [super::Database]
+#[derive(Clone)]
 pub struct Run {
     /// Run url
     pub url: ArcStr,

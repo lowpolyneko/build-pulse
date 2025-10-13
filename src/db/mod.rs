@@ -181,13 +181,14 @@ where
 }
 
 /// Database object
+#[derive(Clone)]
 pub struct Database {
     /// Sender to connection background thread
     tx: mpsc::UnboundedSender<Box<dyn Message>>,
 }
 
 /// Represents an item `T` in [Database]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct InDatabase<T> {
     /// Row ID of `item`
     pub id: i64,
