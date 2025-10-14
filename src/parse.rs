@@ -50,20 +50,9 @@ impl<T> Deref for Pattern<T> {
 }
 
 impl<T> PatternSet<T> {
-    /// Create a new [PatternSet] with `items` and a [Regex] map `f`
-    pub fn new<I, F, P>(items: I, mut f: F) -> Result<Self, <P as TryInto<Regex>>::Error>
-    where
-        I: IntoIterator<Item = T>,
-        F: FnMut(&T) -> P,
-        P: TryInto<Regex>,
-        <P as TryInto<Regex>>::Error: From<regex::Error>,
-    {
-        let patterns = items
-            .into_iter()
-            .map(|item| f(&item).try_into().map(|regex| Pattern { regex, item }))
-            .collect::<Result<Vec<_>, _>>()?;
+    /// Create a new [PatternSet] from a set of [Pattern]s
+    pub fn new(patterns: Vec<Pattern<T>>) -> Result<Self, regex::Error> {
         let pattern_set = RegexSet::new(patterns.iter().map(|m| m.regex.as_str()))?;
-
         Ok(Self {
             patterns,
             pattern_set,
@@ -91,6 +80,11 @@ impl<T> PatternSet<T> {
 }
 
 impl<T> Pattern<T> {
+    /// Create a new pattern
+    pub fn new(item: T, regex: Regex) -> Self {
+        Self { item, regex }
+    }
+
     /// Grep `field` for substrings
     pub fn grep_substr(&self, field: &ArcStr) -> impl Iterator<Item = Substr> {
         self.regex

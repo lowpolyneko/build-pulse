@@ -1,7 +1,7 @@
 use arcstr::ArcStr;
 
 use crate::{
-    config::{Field, Severity},
+    config::{ConfigTag, Field, Severity},
     db::{Queryable, Run, Upsertable},
     read_value, schema, write_value,
 };
@@ -28,6 +28,17 @@ schema! {
         desc            TEXT NOT NULL,
         field           TEXT NOT NULL,
         severity        TEXT NOT NULL
+    }
+}
+
+impl From<ConfigTag> for TagInfo {
+    fn from(value: ConfigTag) -> Self {
+        Self {
+            name: value.name.into(),
+            desc: value.desc.into(),
+            field: value.from,
+            severity: value.severity,
+        }
     }
 }
 
@@ -113,11 +124,11 @@ impl TagInfo {
         db.call(|conn| {
             conn.execute(
                 "
-            DELETE FROM tags WHERE NOT EXISTS (
-                SELECT 1 FROM issues
-                WHERE tags.id = issues.tag_id
-            )
-            ",
+                DELETE FROM tags WHERE NOT EXISTS (
+                    SELECT 1 FROM issues
+                    WHERE tags.id = issues.tag_id
+                )
+                ",
                 (),
             )
         })
