@@ -8,12 +8,12 @@ use crate::{
 
 /// [Issue] stored in [super::Database]
 pub struct IssueInfo {
-    snippet_start: usize,
-    snippet_end: usize,
-    run_id: i64,
-    artifact_id: Option<i64>,
-    tag_id: i64,
-    duplicates: u64,
+    pub snippet_start: usize,
+    pub snippet_end: usize,
+    pub run_id: i64,
+    pub artifact_id: Option<i64>,
+    pub tag_id: i64,
+    pub duplicates: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -80,7 +80,7 @@ impl IssueInfo {
                 conn.prepare_cached(
                     "
                     SELECT
-                        issues.id,
+                        id,
                         snippet_start,
                         snippet_end,
                         run_id,
@@ -88,7 +88,7 @@ impl IssueInfo {
                         tag_id,
                         duplicates
                     FROM issues
-                    WHERE issues.run_id = ?
+                    WHERE run_id = ?
                     ",
                 )?
                 .query_map((id,), Self::map_row)?
@@ -108,6 +108,7 @@ impl IssueInfo {
                         tag_id,
                         duplicates
                     FROM issues
+                    JOIN tags ON tags.id = issues.tag_id
                     WHERE issues.run_id = ?
                     AND tags.severity != ?
                     ",
@@ -188,19 +189,19 @@ impl super::InDatabase<IssueInfo> {
 }
 
 impl Issue {
-    fn as_params(
-        &self,
+    pub fn into_issue_info(
+        self,
         run: &super::InDatabase<Run>,
         artifact: Option<&super::InDatabase<Artifact>>,
-    ) -> rusqlite::Result<impl rusqlite::Params> {
+    ) -> IssueInfo {
         let core::ops::Range::<_> { start, end } = self.snippet.range();
-        Ok((
-            start,
-            end,
-            run.id,
-            artifact.map(|a| a.id),
-            self.tag_id,
-            self.duplicates.cast_signed(),
-        ))
+        IssueInfo {
+            snippet_start: start,
+            snippet_end: end,
+            run_id: run.id,
+            artifact_id: artifact.map(|a| a.id),
+            tag_id: self.tag_id,
+            duplicates: self.duplicates,
+        }
     }
 }

@@ -124,10 +124,3 @@ impl TagInfo {
         .await
     }
 }
-
-impl super::InDatabase<TagInfo> {
-    /// Converts [super::InDatabase<TagInfo>] into [super::InDatabase<Tag>]
-    pub fn into_tag(self, t: Tag) -> super::InDatabase<Tag> {
-        super::InDatabase::new(self.id, t)
-    }
-}

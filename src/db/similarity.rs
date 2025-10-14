@@ -1,16 +1,16 @@
 use std::{
-    cmp::Reverse,
     collections::{HashMap, HashSet},
+    str::from_utf8,
 };
 
-use arcstr::Substr;
+use arcstr::{ArcStr, Substr};
 use futures::{TryFutureExt, TryStreamExt};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
     config::Field,
-    db::{InDatabase, IssueInfo, Queryable, TagInfo},
+    db::{Artifact, InDatabase, IssueInfo, Queryable, Run, TagInfo},
     schema,
 };
 
@@ -59,6 +59,7 @@ impl Similarity {
             run_id: i64,
         }
 
+        // TODO: stream this!
         db.call(|conn| -> rusqlite::Result<UnboundedReceiverStream<_>> {
             let (tx, rx) = mpsc::unbounded_channel();
             conn.prepare_cached(
@@ -101,28 +102,64 @@ impl Similarity {
             Ok(rx.into())
         })
         .await?
-        .try_fold(HashMap::new(), |hm, info| async {
-            let tag = TagInfo::select_one(db, info.tag_id).await?;
-            hm.entry(info.similarity.similarity_hash)
-                .or_insert({
-                    Self {
-                        tag,
-                        related: HashSet::new(),
-                        example: match tag.field {
-                            Field::Artifact => {}
-                            Field::RunName => {}
-                            Field::Console => {}
-                        },
-                        // example: IssueInfo::select_one(db, info.similarity.issue_id)
-                        //     .await?
-                        //     .into_issue(),
-                    }
-                })
-                .related
-                .insert(info.run_id);
+        .try_fold(
+            HashMap::new(),
+            |mut hm,
+             InfoSet {
+                 similarity:
+                     SimilarityInfo {
+                         similarity_hash,
+                         issue_id,
+                     },
+                 tag_id,
+                 run_id,
+             }| async move {
+                let tag = TagInfo::select_one(db, tag_id).await?;
+                let field = tag.field;
+                hm.entry(similarity_hash)
+                    .or_insert({
+                        Self {
+                            tag,
+                            related: HashSet::new(),
+                            example: IssueInfo::select_one(db, issue_id)
+                                .and_then(|i| async {
+                                    match field {
+                                        Field::Console => Run::select_one(db, run_id)
+                                            .await?
+                                            .item()
+                                            .log
+                                            .map_or(Err(rusqlite::Error::InvalidQuery), |l| {
+                                                Ok(i.into_issue(&l))
+                                            }),
+                                        Field::RunName => Ok(i.into_issue(
+                                            &Run::select_one_display_name(db, run_id).await?.into(),
+                                        )),
+                                        Field::Artifact => {
+                                            let artifact_id = i
+                                                .artifact_id
+                                                .ok_or(rusqlite::Error::InvalidQuery)?;
+                                            Ok(i.into_issue(
+                                                // TODO: share Vec<u8> contents somehow?
+                                                &from_utf8(
+                                                    &Artifact::select_one(db, artifact_id)
+                                                        .await?
+                                                        .contents,
+                                                )
+                                                .map(ArcStr::from)?,
+                                            ))
+                                        }
+                                    }
+                                })
+                                .map_ok(|i| i.item().snippet)
+                                .await?,
+                        }
+                    })
+                    .related
+                    .insert(run_id);
 
-            Ok::<_, rusqlite::Error>(hm)
-        })
+                Ok::<_, rusqlite::Error>(hm)
+            },
+        )
         .map_ok(|hm| hm.into_values())
         .await
 

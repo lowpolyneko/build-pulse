@@ -1,8 +1,12 @@
+use std::str::from_utf8;
+
 use arcstr::ArcStr;
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use jenkins_api::build::BuildStatus;
 
 use crate::{
-    db::{JobBuild, Queryable, Upsertable},
+    config::Field,
+    db::{Artifact, Issue, IssueInfo, JobBuild, Queryable, TagInfo, Upsertable},
     read_value, schema,
     tag_expr::TagExpr,
     write_value,
@@ -192,5 +196,45 @@ impl Run {
             )
         })
         .await
+    }
+}
+
+impl super::InDatabase<Run> {
+    /// Get a [Run]'s [Issue]s in [super::Database]
+    pub async fn select_all_issues(
+        &self,
+        db: &super::Database,
+        include_metadata: bool,
+    ) -> rusqlite::Result<Vec<super::InDatabase<Issue>>> {
+        IssueInfo::select_all_by_run(db, self, include_metadata)
+            .and_then(|issues| async {
+                futures::stream::iter(issues)
+                    .then(|i| async {
+                        match TagInfo::select_one(db, i.tag_id).await?.field {
+                            Field::Console => {
+                                self.log
+                                    .as_ref()
+                                    .map_or(Err(rusqlite::Error::InvalidQuery), |l| {
+                                        Ok(i.into_issue(l))
+                                    })
+                            }
+                            Field::RunName => Ok(i.into_issue(&self.display_name)),
+                            Field::Artifact => {
+                                let artifact_id =
+                                    i.artifact_id.ok_or(rusqlite::Error::InvalidQuery)?;
+                                Ok(i.into_issue(
+                                    // TODO: share Vec<u8> contents somehow?
+                                    &from_utf8(
+                                        &Artifact::select_one(db, artifact_id).await?.contents,
+                                    )
+                                    .map(ArcStr::from)?,
+                                ))
+                            }
+                        }
+                    })
+                    .try_collect()
+                    .await
+            })
+            .await
     }
 }
