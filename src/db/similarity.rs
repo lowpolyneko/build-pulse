@@ -162,15 +162,5 @@ impl Similarity {
         )
         .map_ok(|hm| hm.into_values())
         .await
-
-        // let mut similarities: Vec<_> = hm
-        //     .into_values()
-        //     // ignore similarities within the same run
-        //     .filter(|s| s.related.len() > 1)
-        //     .collect();
-        //
-        // similarities.sort_by_cached_key(|s| Reverse(s.related.len()));
-        //
-        // Ok(similarities)
     }
 }
