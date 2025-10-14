@@ -11,7 +11,7 @@ use anyhow::{Error, Result};
 use arcstr::ArcStr;
 use clap::{Parser, crate_name, crate_version};
 use env_logger::Env;
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future, stream};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, future, stream};
 use jenkins_api::{
     Jenkins, JenkinsBuilder,
     build::{Build, BuildStatus, ShortBuild},
@@ -34,7 +34,7 @@ use crate::{
         Artifact, Database, InDatabase, Issue, IssueInfo, Job, JobBuild, Queryable, Run,
         SimilarityInfo, TagInfo, Upsertable,
     },
-    parse::{PatternSet, normalized_levenshtein_distance},
+    parse::{Pattern, PatternSet, normalized_levenshtein_distance},
 };
 
 mod api;
@@ -541,20 +541,19 @@ async fn calculate_similarities(
         let (hash, g) = h?;
         // unique issues are discarded
         if g.len() > 1 {
-            g.iter().try_for_each(|i| {
+            for i in g {
                 SimilarityInfo {
                     similarity_hash: hash,
                     issue_id: i.id,
                 }
-                .insert(db, ())?;
+                .insert(db)
+                .await?;
 
                 info!(
                     "Issue '#{}' likely matches with similarity group '#{}'!",
                     i.id, hash
                 );
-
-                Ok::<_, Error>(())
-            })?;
+            }
         }
     }
 
@@ -564,21 +563,25 @@ async fn calculate_similarities(
 /// Copies the rendered versions of every [Artifact] into `folder`
 async fn copy_artifacts<P: AsRef<Path>>(
     folder: P,
-    artifacts: Arc<[(Regex, ConfigArtifact)]>,
+    artifacts: Arc<PatternSet<ConfigArtifact>>,
     db: &Database,
 ) -> Result<()> {
     // create dir first
     fs::create_dir_all(&folder).await?;
 
     // render and copy
-    let mut handles: JoinSet<_> = Artifact::select_all(db, ())?
+    let mut handles: JoinSet<_> = Artifact::select_all(db)
+        .await?
         .into_iter()
         .map(|artifact| {
             let artifacts = artifacts.clone();
-            let display_name = Run::select_one_display_name(db, artifact.run_id)?;
-            let url = Run::select_one_url(db, artifact.run_id)?;
+            let db = db.clone();
             let path = folder.as_ref().join(artifact.id.to_string());
             Ok(async move {
+                let display_name = Run::select_one_display_name(&db, artifact.run_id)
+                    .await
+                    .unwrap();
+                let url = Run::select_one_url(&db, artifact.run_id).await.unwrap();
                 let blob = if let Some((_, c)) =
                     artifacts.iter().find(|(re, _)| re.is_match(&artifact.path))
                     && let Some(mut iter) = c.render.as_ref().map(|argv| argv.iter())
@@ -612,7 +615,7 @@ async fn main() -> Result<()> {
     info!("{} {}", crate_name!(), crate_version!());
 
     // load config
-    info!("Compiling issue patterns...");
+    info!("Loading config...");
     let Config {
         artifact,
         blocklist,
@@ -627,8 +630,13 @@ async fn main() -> Result<()> {
         username,
         view,
     } = toml::from_str(&fs::read_to_string(args.config).await?)?;
-    let tags = TagSet::from_config(tag)?;
-    let artifact: Arc<_> = PatternSet::new(artifact, |a| a.path)?.into();
+    let artifacts: Arc<_> = PatternSet::new(
+        artifact
+            .into_iter()
+            .map(|a| Ok(Pattern::new(a, Regex::new(&a.path)?)))
+            .collect()?,
+    )?
+    .into();
 
     // open db
     info!("Opening database...");
@@ -640,9 +648,19 @@ async fn main() -> Result<()> {
         database.purge_cache().await?;
     }
 
-    // update TagSet
-    info!("Updating tags...");
-    let tags = tags.upsert_tag_set(&database).await?;
+    // update PatternSet
+    info!("Compiling issue patterns...");
+    let tags = PatternSet::new(
+        stream::iter(tag)
+            .then(|t| async {
+                Ok(Pattern::new(
+                    TagInfo::from(t).upsert(&database).await?,
+                    Regex::new(&t.pattern)?,
+                ))
+            })
+            .try_collect()
+            .await?,
+    )?;
 
     // purge outdated issues
     let outdated = IssueInfo::delete_all_invalid_by_tag_schema(&database, tags.schema()).await?;
@@ -673,14 +691,18 @@ async fn main() -> Result<()> {
     info!("----------------------------------------");
 
     let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
-    let runs = pull_build_logs(
-        project,
-        artifact.clone(),
-        &blocklist,
+    let runs = JenkinsPuller {
+        db: database,
+        jenkins: jenkins.into(),
         last_n_history,
-        jenkins.into(),
-        &database,
-    )
+        artifacts,
+    }
+    .pull_stream(SparseMatrixProjectContext {
+        project,
+        blocklist: &blocklist,
+    })
+    .await?
+    .collect()
     .await?;
 
     info!("Done!");
@@ -713,7 +735,7 @@ async fn main() -> Result<()> {
     if let Some(output) = args.output {
         info!("Generating report...");
 
-        copy_artifacts("artifacts", artifact, &database).await?;
+        copy_artifacts("artifacts", artifacts, &database).await?;
 
         let markup = task::spawn(async move {
             page::render(
