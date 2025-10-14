@@ -361,25 +361,26 @@ where
 /// Parse all untagged runs for `tags` and cache them into database `db`
 async fn parse_unprocessed_runs(
     runs: Vec<InDatabase<Run>>,
-    tags: Arc<TagSet<InDatabase<Tag>>>,
+    tags: Arc<PatternSet<InDatabase<TagInfo>>>,
     db: &Database,
 ) -> Result<Vec<InDatabase<Issue>>> {
     let mut inserted_issues = Vec::new();
+    let mut handles = JoinSet::new();
 
     enum Dependent {
-        Run(Issue),
-        Artifact(Issue, Arc<InDatabase<Artifact>>),
+        Run(IssueInfo),
+        Artifact(IssueInfo, Arc<InDatabase<Artifact>>),
     }
 
-    let mut handles: JoinSet<_> = runs
-        .into_iter()
-        .filter_map(|run| match run.tag_schema {
+    // TODO: Stream this!
+    for run in runs {
+        match run.tag_schema {
             None => {
                 let tags = tags.clone();
-                let artifacts = Artifact::select_all_by_run(db, run.id, ());
-                Some(async move {
+                let artifacts = Artifact::select_all_by_run(db, run.id).await;
+                handles.spawn(async move {
                     let issues: Vec<_> = {
-                        let warn = |t: &InDatabase<Tag>| match t.severity {
+                        let warn = |t: &InDatabase<TagInfo>| match t.severity {
                             Severity::Metadata => {}
                             _ => warn!(
                                 "Found issue(s) tagged '{}' in run '{}'",
@@ -387,19 +388,19 @@ async fn parse_unprocessed_runs(
                             ),
                         };
                         let run_name = tags
-                            .grep_tags(run.display_name.clone(), Field::RunName)
-                            .flat_map(|t| t.grep_issue(run.display_name.clone()))
-                            .map(Dependent::Run);
+                            .grep_matches(run.display_name)
+                            .flat_map(|t| t.grep_issue(&run.display_name))
+                            .map(|i| Dependent::Run(i.into_issue_info(&run, None)));
                         let console = run
                             .log
                             .iter()
                             .flat_map(|l| {
-                                tags.grep_tags(l.clone(), Field::Console).flat_map(|t| {
+                                tags.grep_matches(l).flat_map(|t| {
                                     warn(t);
-                                    t.grep_issue(l.clone())
+                                    t.grep_issue(&l)
                                 })
                             })
-                            .map(Dependent::Run);
+                            .map(|i| Dependent::Run(i.into_issue_info(&run, None)));
                         let artifact = artifacts
                             .into_iter()
                             .flatten()
@@ -409,12 +410,17 @@ async fn parse_unprocessed_runs(
                                     .ok()
                                     .map(|b| -> arcstr::ArcStr { b.into() })
                                     .map(|blob| {
-                                        tags.grep_tags(blob.clone(), Field::Artifact)
+                                        tags.grep_matches(blob)
                                             .flat_map(move |t| {
                                                 warn(t);
-                                                t.grep_issue(blob.clone())
+                                                t.grep_issue(&blob)
                                             })
-                                            .map(move |i| Dependent::Artifact(i, a.clone()))
+                                            .map(|i| {
+                                                Dependent::Artifact(
+                                                    i.into_issue_info(&run, Some(&a)),
+                                                    a,
+                                                )
+                                            })
                                     })
                             })
                             .flatten();
@@ -423,38 +429,43 @@ async fn parse_unprocessed_runs(
                     };
 
                     (run, issues)
-                })
+                });
             }
             _ => {
-                inserted_issues.extend(
-                    Issue::select_all_not_metadata(db, (db, &run))
-                        .into_iter()
-                        .flatten(),
-                );
-                None
+                inserted_issues.extend(run.select_all_issues(db, false).await?);
             }
-        })
-        .collect();
+        }
+    }
 
     while let Some(h) = handles.join_next().await {
         let (run, issues) = h?;
-        inserted_issues = issues.into_iter().try_fold(inserted_issues, |mut acc, i| {
-            let issue = match i {
-                Dependent::Run(issue) => issue.insert(db, (&run, None))?,
-                Dependent::Artifact(issue, artifact) => {
-                    issue.insert(db, (&run, Some(&artifact)))?
-                }
+
+        // TODO: deduplicate this...
+        for i in issues {
+            let (info, artifact) = match i {
+                Dependent::Run(issue) => (issue, None),
+                Dependent::Artifact(issue, artifact) => (issue, Some(artifact)),
             };
-            match TagInfo::select_one(db, issue.tag_id, ())?.severity {
-                Severity::Metadata => {}
-                _ => acc.push(issue),
+            let tag = TagInfo::select_one(db, info.tag_id).await?;
+
+            // FIXME: This is a complete hack
+            let issue = match tag.field {
+                Field::Console => info.insert(db).await?.into_issue(run.log.as_ref().unwrap()),
+                Field::RunName => info.insert(db).await?.into_issue(&run.display_name),
+                Field::Artifact => info
+                    .insert(db)
+                    .await?
+                    .into_issue(&from_utf8(&artifact.unwrap().contents).unwrap().into()),
+            };
+
+            if matches!(tag.severity, Severity::Metadata) {
+                inserted_issues.push(issue);
             }
-            Ok::<_, Error>(acc)
-        })?;
+        }
     }
 
     // batch update tag schema for runs afterwards
-    Run::update_all_tag_schema(db, Some(tags.schema()))?;
+    Run::update_all_tag_schema(db, Some(tags.schema())).await?;
     Ok(inserted_issues)
 }
 
