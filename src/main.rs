@@ -19,13 +19,7 @@ use jenkins_api::{
 use log::{Level, info, log, warn};
 use regex::Regex;
 use time::UtcOffset;
-use tokio::{
-    fs,
-    io::AsyncWriteExt,
-    process::Command,
-    sync::Semaphore,
-    task::{self, JoinSet},
-};
+use tokio::{fs, io::AsyncWriteExt, process::Command, sync::Semaphore, task::JoinSet};
 
 use crate::{
     api::{AsBuild, AsJob, AsRun, SparseBuild, SparseJob, SparseMatrixProject},
@@ -377,7 +371,7 @@ async fn parse_unprocessed_runs(
         match run.tag_schema {
             None => {
                 let tags = tags.clone();
-                let artifacts = Artifact::select_all_by_run(db, run.id).await;
+                let artifacts = Artifact::select_all_by_run(db, run.id).await?;
                 handles.spawn(async move {
                     let issues: Vec<_> = {
                         let warn = |t: &InDatabase<TagInfo>| match t.severity {
@@ -388,37 +382,39 @@ async fn parse_unprocessed_runs(
                             ),
                         };
                         let run_name = tags
-                            .grep_matches(run.display_name)
+                            .grep_matches(run.display_name.clone())
                             .flat_map(|t| t.grep_issue(&run.display_name))
                             .map(|i| Dependent::Run(i.into_issue_info(&run, None)));
                         let console = run
                             .log
                             .iter()
                             .flat_map(|l| {
-                                tags.grep_matches(l).flat_map(|t| {
+                                tags.grep_matches(l.clone()).flat_map(|t| {
                                     warn(t);
-                                    t.grep_issue(&l)
+                                    t.grep_issue(l)
                                 })
                             })
                             .map(|i| Dependent::Run(i.into_issue_info(&run, None)));
                         let artifact = artifacts
                             .into_iter()
-                            .flatten()
-                            .map(|a| a.into())
-                            .filter_map(|a: Arc<_>| {
+                            .map(Arc::from)
+                            .filter_map(|a| {
+                                let run = run.clone();
                                 from_utf8(&a.contents)
                                     .ok()
                                     .map(|b| -> arcstr::ArcStr { b.into() })
                                     .map(|blob| {
-                                        tags.grep_matches(blob)
+                                        tags.grep_matches(blob.clone())
                                             .flat_map(move |t| {
                                                 warn(t);
-                                                t.grep_issue(&blob)
+                                                t.grep_issue(&blob.clone())
+                                                    .collect::<Vec<_>>() // FIXME hack
+                                                    .into_iter()
                                             })
-                                            .map(|i| {
+                                            .map(move |i: Issue| {
                                                 Dependent::Artifact(
                                                     i.into_issue_info(&run, Some(&a)),
-                                                    a,
+                                                    a.clone(),
                                                 )
                                             })
                                     })
@@ -582,8 +578,7 @@ async fn copy_artifacts<P: AsRef<Path>>(
                     .await
                     .unwrap();
                 let url = Run::select_one_url(&db, artifact.run_id).await.unwrap();
-                let blob = if let Some((_, c)) =
-                    artifacts.iter().find(|(re, _)| re.is_match(&artifact.path))
+                let blob = if let Some(c) = artifacts.grep_matches(&artifact.path).next()
                     && let Some(mut iter) = c.render.as_ref().map(|argv| argv.iter())
                     && let Some(program) = iter.next()
                 {
@@ -633,14 +628,18 @@ async fn main() -> Result<()> {
     let artifacts: Arc<_> = PatternSet::new(
         artifact
             .into_iter()
-            .map(|a| Ok(Pattern::new(a, Regex::new(&a.path)?)))
-            .collect()?,
+            .map(|a| {
+                Regex::new(&a.path)
+                    .map_err(Error::from)
+                    .map(|regex| Pattern::new(a, regex))
+            })
+            .collect::<Result<_>>()?,
     )?
     .into();
 
     // open db
     info!("Opening database...");
-    let mut database = Database::open(&database).await?;
+    let database = Database::open(&database).await?;
 
     // check for cache purge
     if args.purge_cache {
@@ -653,9 +652,13 @@ async fn main() -> Result<()> {
     let tags = PatternSet::new(
         stream::iter(tag)
             .then(|t| async {
-                Ok(Pattern::new(
-                    TagInfo::from(t).upsert(&database).await?,
-                    Regex::new(&t.pattern)?,
+                let regex = Regex::new(&t.pattern)?;
+                Ok::<_, Error>(Pattern::new(
+                    TagInfo::from(t)
+                        .upsert(&database)
+                        .map_err(Error::from)
+                        .await?,
+                    regex,
                 ))
             })
             .try_collect()
@@ -669,7 +672,8 @@ async fn main() -> Result<()> {
     }
 
     // purge blocklisted jobs
-    let blocked = Job::delete_all_by_blocklist(&database, blocklist.into_iter()).await?;
+    // TODO don't clone this
+    let blocked = Job::delete_all_by_blocklist(&database, blocklist.clone()).await?;
     if blocked > 0 {
         warn!("Purged {blocked} jobs that are on the blocklist.");
     }
@@ -692,17 +696,17 @@ async fn main() -> Result<()> {
 
     let project = SparseMatrixProject::pull_jobs(&jenkins, &project).await?;
     let runs = JenkinsPuller {
-        db: database,
+        db: database.clone(),
         jenkins: jenkins.into(),
         last_n_history,
-        artifacts,
+        artifacts: artifacts.clone(),
     }
     .pull_stream(SparseMatrixProjectContext {
         project,
         blocklist: &blocklist,
     })
     .await?
-    .collect()
+    .try_collect()
     .await?;
 
     info!("Done!");
@@ -737,23 +741,22 @@ async fn main() -> Result<()> {
 
         copy_artifacts("artifacts", artifacts, &database).await?;
 
-        let markup = task::spawn(async move {
-            page::render(
-                &database,
-                &view,
-                UtcOffset::from_hms(timezone, 0, 0).unwrap(),
-            )
-            .unwrap()
-            .into_string()
-        });
+        let markup = page::render(
+            &database,
+            &view,
+            UtcOffset::from_hms(timezone, 0, 0).unwrap(),
+        )
+        .await
+        .unwrap()
+        .into_string();
 
         if let Some(filepath) = output {
-            fs::write(&filepath, markup.await?).await?;
+            fs::write(&filepath, markup).await?;
 
             info!("Written to {filepath}");
         } else {
             info!("Dumping to stdout --");
-            println!("{}", markup.await?);
+            println!("{}", markup);
         }
     }
 
