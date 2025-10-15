@@ -211,7 +211,9 @@ impl TryPull<RunContext, InDatabase<Run>> for JenkinsPuller {
                                     run.display_name,
                                     e
                                 );
-                            });
+                            })
+                            .try_collect::<Vec<_>>()
+                            .await?;
 
                         log!(
                             match run.status {
