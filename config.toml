@@ -275,6 +275,16 @@ pattern = '''(?m)^not ok [0-9]+ - .*\n([\s#]{2}.*)*$'''
 from = "Artifact"
 severity = "Warning"
 
+[[tag]]
+name = "perl_syntax_error"
+desc = "Perl syntax error message"
+
+# Matches messages of the following
+# syntax error at <filename> line <line_number>, near "<offending_code>"
+pattern = '''(?m)^syntax error at [a-zA-Z0-9_\-\./ ]+ line [0-9]+, near ".*"$'''
+from = "Console"
+severity = "Error"
+
 ### PLATFORM TAGS
 ### ----------------------------------------------------------------------
 [[tag]]
